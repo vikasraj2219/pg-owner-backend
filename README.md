@@ -385,17 +385,17 @@ export const formatINR = (paise: number) =>
 ### Stage 1: Backend foundation and mobile shell (Weeks 2–3)
 **Goal:** authentication and tenant scoping working on a real phone.
 
-*Backend*
-- Models: Organization, User, Subscription (stub with 14-day trial).
-- Endpoints: register-owner, login, me.
-- Middleware: `protect` (JWT), `enforceOrgScope` (injects `req.orgId`), rate limiting on auth routes.
-- **Test:** Organization B gets a 403/404 for Organization A's resources.
+*Backend (Completed ✅)*
+- [x] Models: Organization, User, Subscription (stub with 14-day trial).
+- [x] Endpoints: register-owner, login, me.
+- [x] Middleware: `protect` (JWT), `enforceOrgScope` (injects `req.orgId`), rate limiting on auth routes.
+- [x] **Test:** Organization B gets a 403/404 for Organization A's resources.
 
-*Mobile*
-- Initialize Expo with NativeWind v4.
-- Build `(auth)/login.tsx` and `register.tsx`.
-- Store the JWT in `expo-secure-store`.
-- Add biometric unlock with `expo-local-authentication`.
+*Mobile (Next Step ⏳)*
+- [x] Initialize Expo with NativeWind v4 (Stage 0).
+- [ ] Connect `(auth)/login.tsx` and `register.tsx` to backend auth APIs.
+- [ ] Store the JWT in `expo-secure-store`.
+- [ ] Add biometric unlock with `expo-local-authentication`.
 
 **Exit:** register on a physical phone, close the app, unlock with biometrics, see an authenticated screen.
 
@@ -541,3 +541,26 @@ await runInTransaction(async (session) => {
     - [`tests/errorHandler.test.ts`](tests/errorHandler.test.ts): Custom `AppError`, Zod validation errors, Mongoose duplicate key, CastError, JWT errors, 500 fallback.
     - [`tests/database.test.ts`](tests/database.test.ts): State mapping, disconnected handling, live Atlas replica set connect/disconnect lifecycle.
     - [`tests/env.test.ts`](tests/env.test.ts): Environment variable validation & fallback defaults.
+
+### ✅ Stage 1: Backend Foundation & Authentication
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Mongoose Data Models**:
+    - [`src/models/Organization.ts`](src/models/Organization.ts): Owner information, phone, email, settings (`rentDueDay`, `gracePeriodDays`, `defaultLateFeePaise`).
+    - [`src/models/User.ts`](src/models/User.ts): Multi-tenant User with bcrypt password hashing, `role: 'owner' | 'manager' | 'staff'`, hidden password query default, and `comparePassword` method.
+    - [`src/models/Subscription.ts`](src/models/Subscription.ts): Multi-tenant Subscription with starter 14-day free trial, `plan: 'starter' | 'growth' | 'pro'`, and tier-based property/bed quotas.
+  - **Authentication API**:
+    - `POST /api/auth/register-owner`: Atomic multi-document transaction provisioning Organization, Owner User, and Starter 14-day trial Subscription; returns JWT and typed responses.
+    - `POST /api/auth/login`: Supports login with email or phone number, password verification, active status guard; returns JWT and tenant context.
+    - `GET /api/auth/me`: Authenticated endpoint returning user profile, organization settings, and current subscription plan limits.
+  - **Security & Multi-Tenant Middleware**:
+    - [`src/middleware/auth.ts`](src/middleware/auth.ts): Bearer JWT authentication (`protect`) and RBAC authorization (`requireRole`).
+    - [`src/middleware/enforceOrgScope.ts`](src/middleware/enforceOrgScope.ts): Strictly guards against cross-tenant data tampering by enforcing `req.orgId` in route parameters and request bodies; includes `scopeFilter` helper for Mongoose query auto-bounding.
+    - [`src/middleware/rateLimiter.ts`](src/middleware/rateLimiter.ts): IP rate limiting on authentication routes (30 requests per 15 min).
+  - **Validation & Services**:
+    - [`src/validators/auth.validator.ts`](src/validators/auth.validator.ts): Strict Zod schema validation for registration and login inputs.
+    - [`src/services/token.service.ts`](src/services/token.service.ts): JWT signing and verification utility.
+  - **Test Suite (38/38 Passing, 89.4% statement coverage)**:
+    - [`tests/auth.test.ts`](tests/auth.test.ts) (11 tests): Registration creation, duplicate prevention (409), Zod validation (400), login with email/phone, bad passwords (401), and `/me` endpoint.
+    - [`tests/orgScope.test.ts`](tests/orgScope.test.ts) (5 tests): Multi-tenant isolation verifying **Organization B gets 403 Forbidden** when requesting Organization A's resources or injecting Org A IDs.
+

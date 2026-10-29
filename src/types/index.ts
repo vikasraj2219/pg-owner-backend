@@ -13,6 +13,13 @@ export interface AuthenticatedRequest extends Request {
   orgId?: string;
 }
 
+export interface TokenPayload {
+  userId: string;
+  email: string;
+  role: 'owner' | 'manager' | 'staff';
+  orgId: string;
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   message?: string;

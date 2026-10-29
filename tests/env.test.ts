@@ -71,4 +71,3 @@ describe('Environment Variables Schema', () => {
     expect(parsed.success).toBe(false);
   });
 });
-

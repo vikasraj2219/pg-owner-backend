@@ -138,4 +138,3 @@ describe('Error Handler Middleware', () => {
     expect(response.body).toHaveProperty('message');
   });
 });
-
