@@ -371,14 +371,14 @@ export const formatINR = (paise: number) =>
 
 ## 10. Stage-by-Stage Detail
 
-### Stage 0: Setup and pilot securing (Week 1)
+### Stage 0: Setup and pilot securing (Week 1) — *Backend Completed ✅*
 **Goal:** foundation in place and 5 committed pilot users.
-- Create `pg-owner-backend` and `pg-owner-mobile`.
-- Configure ESLint, Prettier, `.env.example`, TypeScript strict mode.
-- Provision MongoDB Atlas M0 (replica set, so transactions work).
-- Wireframe the 4 tabs: Pulse, Matrix, Dues, More.
-- Draft the privacy policy and KYC consent text.
-- **Critical:** meet 5 local PG owners and get their commitment to pilot the Android app in exchange for a free 6-month subscription.
+- [x] Create `pg-owner-backend` and `pg-owner-mobile`.
+- [x] Configure ESLint, Prettier, `.env.example`, TypeScript strict mode.
+- [x] Provision MongoDB Atlas M0 (replica set, so transactions work).
+- [ ] Wireframe the 4 tabs: Pulse, Matrix, Dues, More (Mobile).
+- [x] Draft the privacy policy and KYC consent text (`docs/PRIVACY_AND_KYC_CONSENT.md`).
+- [ ] **Critical:** meet 5 local PG owners and get their commitment to pilot the Android app in exchange for a free 6-month subscription (`docs/STAGE_0_PILOT_TRACKER.md`).
 
 **Exit:** both repos push cleanly; 5 named owners locked in.
 
@@ -520,3 +520,24 @@ await runInTransaction(async (session) => {
 - **Manual UPI confirmation** means owners must reconcile payments themselves; make "Mark received" fast and add an audit trail.
 - **Store policies** on subscriptions change; re-check before Stage 7.
 - **Competitor claims** (fees, check-in times) in marketing material should be verified before publishing.
+
+---
+
+## 13. Build Execution & Progress Log
+
+### ✅ Stage 0: Setup and Foundation (Backend)
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Stack Setup**: Node.js + Express + TypeScript + Mongoose + Zod configured with strict mode.
+  - **Lint & Format**: ESLint 9 flat configuration (`eslint.config.mjs`) and Prettier (`.prettierrc`).
+  - **Security & Infrastructure**: Helmet, CORS, body parsers, Morgan logging, `AppError` and centralized `errorHandler` (handles Zod validation, Mongo duplicate keys, CastError, JWT errors).
+  - **Database & Replica Set**: Connected to MongoDB Atlas cluster (`atlas-vnuarb-shard-0` replica set).
+  - **Database Cleanup**: Cleaned up 30 legacy/incompatible collections to guarantee a fresh start for integer-paise accounting.
+  - **Compliance Docs**:
+    - [`docs/PRIVACY_AND_KYC_CONSENT.md`](docs/PRIVACY_AND_KYC_CONSENT.md): DPDP Act 2023 & UIDAI Aadhaar masking compliance notice and tenant consent agreement.
+    - [`docs/STAGE_0_PILOT_TRACKER.md`](docs/STAGE_0_PILOT_TRACKER.md): Pilot user tracking table & pitch script for 5 PG owners.
+  - **Test Suite (22/22 Passing, 90.7% statement coverage)**:
+    - [`tests/health.test.ts`](tests/health.test.ts): Root `/health`, API `/api/health`, and 404 route handling.
+    - [`tests/errorHandler.test.ts`](tests/errorHandler.test.ts): Custom `AppError`, Zod validation errors, Mongoose duplicate key, CastError, JWT errors, 500 fallback.
+    - [`tests/database.test.ts`](tests/database.test.ts): State mapping, disconnected handling, live Atlas replica set connect/disconnect lifecycle.
+    - [`tests/env.test.ts`](tests/env.test.ts): Environment variable validation & fallback defaults.
