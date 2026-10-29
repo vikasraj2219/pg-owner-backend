@@ -7,4 +7,3 @@ export {
   SubscriptionStatus,
   PLAN_LIMITS,
 } from './Subscription';
-

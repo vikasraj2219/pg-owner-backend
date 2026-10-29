@@ -58,4 +58,3 @@ export const requireRole = (...roles: Array<'owner' | 'manager' | 'staff'>) => {
     next();
   };
 };
-
