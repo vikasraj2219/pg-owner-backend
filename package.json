@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Backend API for PG Owner Mobile Application - Multi-tenant PG & Coliving Management",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",

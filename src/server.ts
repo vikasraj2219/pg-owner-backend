@@ -8,7 +8,7 @@ const startServer = async (): Promise<void> => {
     await connectDatabase();
 
     // 2. Start HTTP Server
-    const server = app.listen(env.PORT, () => {
+    const server = app.listen(env.PORT, '0.0.0.0', () => {
       console.info(`===============================================`);
       console.info(`  PG Owner Backend API running in [${env.NODE_ENV}]`);
       console.info(`  Server URL: http://localhost:${env.PORT}`);
