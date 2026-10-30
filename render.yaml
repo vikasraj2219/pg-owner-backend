@@ -22,3 +22,4 @@ services:
         value: "*"
       - key: INTERNAL_CRON_SECRET
         generateValue: true
+

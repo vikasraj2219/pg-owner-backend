@@ -100,3 +100,4 @@ Once Render finishes deploying (indicated by a green `Live` status badge):
 
 > [!NOTE]
 > On Render's Free tier, services spin down after 15 minutes of inactivity. When a new request arrives, a cold start takes approximately 30–50 seconds.
+
