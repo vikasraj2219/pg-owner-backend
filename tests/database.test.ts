@@ -1,10 +1,6 @@
 import mongoose from 'mongoose';
-import {
-  getDatabaseStatus,
-  mapReadyStateToString,
-  connectDatabase,
-  disconnectDatabase,
-} from '../src/config/database';
+import { getDatabaseStatus, mapReadyStateToString } from '../src/config/database';
+import { startTestDatabase, stopTestDatabase } from './testDb';
 
 describe('Database Configuration & Status', () => {
   afterEach(async () => {
@@ -49,9 +45,9 @@ describe('Database Configuration & Status', () => {
   });
 
   describe('Database Connection Flow', () => {
-    it('successfully connects and disconnects with active Atlas replica set', async () => {
-      const conn = await connectDatabase();
-      expect(conn.connection.readyState).toBe(1);
+    it('successfully connects and disconnects with active replica set', async () => {
+      await startTestDatabase();
+      expect(mongoose.connection.readyState).toBe(1);
 
       const status = getDatabaseStatus();
       expect(status).toEqual({
@@ -59,7 +55,7 @@ describe('Database Configuration & Status', () => {
         connected: true,
       });
 
-      await disconnectDatabase();
+      await stopTestDatabase();
       expect(mongoose.connection.readyState).toBe(0);
       expect(getDatabaseStatus().connected).toBe(false);
     }, 20000);

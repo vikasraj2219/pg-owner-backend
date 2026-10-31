@@ -1,9 +1,10 @@
 import mongoose from 'mongoose';
 import { env } from './env';
 
-export const connectDatabase = async (): Promise<typeof mongoose> => {
+export const connectDatabase = async (customUri?: string): Promise<typeof mongoose> => {
   try {
-    const conn = await mongoose.connect(env.MONGODB_URI, {
+    const uri = customUri || env.MONGODB_URI;
+    const conn = await mongoose.connect(uri, {
       autoIndex: true, // Build indexes in dev, consider false in massive scale
     });
 

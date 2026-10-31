@@ -564,3 +564,30 @@ await runInTransaction(async (session) => {
     - [`tests/auth.test.ts`](tests/auth.test.ts) (11 tests): Registration creation, duplicate prevention (409), Zod validation (400), login with email/phone, bad passwords (401), and `/me` endpoint.
     - [`tests/orgScope.test.ts`](tests/orgScope.test.ts) (5 tests): Multi-tenant isolation verifying **Organization B gets 403 Forbidden** when requesting Organization A's resources or injecting Org A IDs.
 
+
+### ✅ Stage 2: Property Hierarchy & Visual Bed Matrix
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Mongoose Data Models**:
+    - [`src/models/Property.ts`](src/models/Property.ts): Multi-tenant Property with `name`, `type: 'boys' | 'girls' | 'coliving'`, `upiVpa`, `electricityRatePaisePerUnit` (integer paise), unique per org index.
+    - [`src/models/Room.ts`](src/models/Room.ts): Multi-tenant Room linked to Property, `floorNumber`, `roomNumber`, `sharingType` (1-20), `baseRentPaisePerBed` (integer paise), `tags`.
+    - [`src/models/Bed.ts`](src/models/Bed.ts): Multi-tenant Bed linked to Room & Property, auto-numbered (`101-A`, `101-B`), `status: 'available' | 'occupied' | 'notice_period' | 'maintenance'`, optional `maintenanceNote` & `noticeEndDate`.
+    - [`src/models/Tenant.ts`](src/models/Tenant.ts): Tenant schema registered to support future check-ins and populated bed matrix queries.
+  - **REST API Endpoints**:
+    - `POST /api/properties`: Create property with integer paise rate & subscription quota enforcement (Starter plan allows 1 property).
+    - `GET /api/properties`: List properties for authenticated organization with live aggregated stats (totalRooms, totalBeds, occupiedBeds, availableBeds).
+    - `GET /api/properties/:id`: Get detailed single property with stats.
+    - `PUT /api/properties/:id`: Update property details (name, upiVpa, electricity rate).
+    - `DELETE /api/properties/:id`: Owner-only deletion with safeguard preventing deletion of properties with occupied beds.
+    - `POST /api/properties/:id/rooms`: Create room with atomic auto-generation of beds (`${roomNumber}-A`, `${roomNumber}-B`) inside MongoDB transaction, duplicate room prevention, and plan bed quota checking.
+    - `GET /api/properties/:id/rooms`: List rooms for property with populated beds and optional `floorNumber` filter.
+    - `PUT /api/properties/:id/rooms/:roomId`: Update room rent and tags.
+    - `GET /api/properties/:id/matrix`: Visual bed matrix grouping rooms by floor with live beds, tenant details, and comprehensive occupancy summary.
+    - `GET /api/beds/:id`: Single bed details with populated room, property, and tenant.
+    - `PUT /api/beds/:id/status`: Update bed status (e.g. to `maintenance` with note, or `notice_period` with countdown date) with safeguard against resetting occupied beds without checkout.
+  - **Validation & Scoping**:
+    - [`src/validators/property.validator.ts`](src/validators/property.validator.ts): Strict Zod schema validation for property, room, and bed operations.
+    - [`src/middleware/enforceOrgScope.ts`](src/middleware/enforceOrgScope.ts): Multi-tenant hard-scoping on all property, room, and bed endpoints.
+  - **Test Suite (61/61 Passing across all 8 test suites)**:
+    - [`tests/property.test.ts`](tests/property.test.ts) (16 tests): Unauthenticated rejection (401), validation (400), creation, duplicates (409), subscription limits (403), org scoping isolation (404), bed auto-generation, and room listing/filtering.
+    - [`tests/matrix.test.ts`](tests/matrix.test.ts) (6 tests): Grouped matrix response with floor-room-bed hierarchy, summary calculations, bed status transitions, and cross-tenant isolation (404).

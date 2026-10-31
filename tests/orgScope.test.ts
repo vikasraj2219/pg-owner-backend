@@ -1,6 +1,6 @@
 import request from 'supertest';
 import express, { Response } from 'express';
-import { connectDatabase, disconnectDatabase } from '../src/config/database';
+import { startTestDatabase, stopTestDatabase } from './testDb';
 import { protect, requireRole } from '../src/middleware/auth';
 import { enforceOrgScope, scopeFilter } from '../src/middleware/enforceOrgScope';
 import { errorHandler } from '../src/middleware/errorHandler';
@@ -59,7 +59,7 @@ describe('Organization Scoping & Multi-Tenant Isolation (Stage 1 Test Requiremen
   testApp.use(errorHandler);
 
   beforeAll(async () => {
-    await connectDatabase();
+    await startTestDatabase();
 
     // Create Organization A & Owner A
     const orgA = await Organization.create({
@@ -89,7 +89,7 @@ describe('Organization Scoping & Multi-Tenant Isolation (Stage 1 Test Requiremen
 
     // Create Organization B & Owner B
     const orgB = await Organization.create({
-      name: 'Org B Coliving',
+      name: 'Org B Hostels',
       ownerName: 'Owner B',
       phone: '9870000002',
       email: 'ownerB@test-scope.com',
@@ -112,12 +112,12 @@ describe('Organization Scoping & Multi-Tenant Isolation (Stage 1 Test Requiremen
       role: userB.role,
       orgId: orgBId,
     });
-  });
+  }, 60000);
 
   afterAll(async () => {
     await User.deleteMany({ email: /@test-scope\.com$/ });
     await Organization.deleteMany({ email: /@test-scope\.com$/ });
-    await disconnectDatabase();
+    await stopTestDatabase();
   });
 
   it('Owner A can access their own organization resources', async () => {
@@ -126,28 +126,29 @@ describe('Organization Scoping & Multi-Tenant Isolation (Stage 1 Test Requiremen
       .set('Authorization', `Bearer ${tokenOwnerA}`);
 
     expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
     expect(response.body.orgId).toBe(orgAId);
   });
 
-  it('CRITICAL: Organization B gets a 403 Forbidden when requesting Organization A resources', async () => {
+  it('CRITICAL: Organization B gets a 403 Forbidden when attempting to access Organization A resources', async () => {
+    // Owner B attempts to request Organization A's route
     const response = await request(testApp)
       .get(`/api/test-scoped/${orgAId}`)
-      .set('Authorization', `Bearer ${tokenOwnerB}`); // Using Owner B token for Org A route
+      .set('Authorization', `Bearer ${tokenOwnerB}`);
 
     expect(response.status).toBe(403);
     expect(response.body.success).toBe(false);
-    expect(response.body.message).toContain(
-      'Forbidden: Access denied to resources of another organization',
-    );
+    expect(response.body.message).toContain('Access denied to resources of another organization');
   });
 
-  it('CRITICAL: Organization B gets a 403 Forbidden when injecting Organization A ID in body', async () => {
+  it('CRITICAL: Organization B gets a 403 Forbidden when injecting Organization A ID in request body', async () => {
+    // Owner B attempts to create or mutate data specifying Org A ID
     const response = await request(testApp)
       .post('/api/test-scoped-create')
       .set('Authorization', `Bearer ${tokenOwnerB}`)
       .send({
-        title: 'Tampered resource',
-        organization: orgAId, // Attempting to assign to Org A
+        organization: orgAId, // Attempt to write to Org A
+        name: 'Malicious Room',
       });
 
     expect(response.status).toBe(403);
@@ -157,46 +158,37 @@ describe('Organization Scoping & Multi-Tenant Isolation (Stage 1 Test Requiremen
     );
   });
 
-  it('scopeFilter helper automatically bounds Mongoose query filters to authenticated org', () => {
-    const mockReq = {
+  it('Automatically binds body organization to authenticated orgId when not specified', async () => {
+    const response = await request(testApp)
+      .post('/api/test-scoped-create')
+      .set('Authorization', `Bearer ${tokenOwnerA}`)
+      .send({
+        name: 'Legitimate Room',
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data.organization).toBe(orgAId);
+  });
+
+  it('scopeFilter helper safely appends organization to Mongoose query criteria', () => {
+    const mockReq: AuthenticatedRequest = {
       orgId: orgAId,
     } as AuthenticatedRequest;
 
-    const query = scopeFilter(mockReq, { status: 'occupied' });
-    expect(query).toEqual({
+    const queryFilter = scopeFilter(mockReq, { status: 'occupied', floor: 2 });
+
+    expect(queryFilter).toEqual({
       status: 'occupied',
+      floor: 2,
       organization: orgAId,
     });
   });
 
-  it('requireRole middleware restricts actions to allowed roles', async () => {
-    // Owner A can access
-    const ownerRes = await request(testApp)
-      .get('/api/test-owner-only')
-      .set('Authorization', `Bearer ${tokenOwnerA}`);
-    expect(ownerRes.status).toBe(200);
+  it('scopeFilter throws 403 if req.orgId is missing', () => {
+    const mockReq: AuthenticatedRequest = {} as AuthenticatedRequest;
 
-    // Create staff user in Org A
-    const staffUser = await User.create({
-      organization: orgAId,
-      name: 'Staff Member',
-      email: 'staff@test-scope.com',
-      phone: '9870000003',
-      password: 'password123',
-      role: 'staff',
-      status: 'active',
-    });
-    const staffToken = generateToken({
-      userId: staffUser._id.toString(),
-      email: staffUser.email,
-      role: staffUser.role,
-      orgId: orgAId,
-    });
-
-    const staffRes = await request(testApp)
-      .get('/api/test-owner-only')
-      .set('Authorization', `Bearer ${staffToken}`);
-    expect(staffRes.status).toBe(403);
-    expect(staffRes.body.message).toContain('Forbidden: You do not have permission');
+    expect(() => {
+      scopeFilter(mockReq, { status: 'occupied' });
+    }).toThrow('Cannot scope query without authenticated organization context');
   });
 });

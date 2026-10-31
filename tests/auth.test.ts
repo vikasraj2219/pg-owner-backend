@@ -1,24 +1,24 @@
 import request from 'supertest';
 import { app } from '../src/app';
-import { connectDatabase, disconnectDatabase } from '../src/config/database';
+import { startTestDatabase, stopTestDatabase } from './testDb';
 import { User } from '../src/models/User';
 import { Organization } from '../src/models/Organization';
 import { Subscription } from '../src/models/Subscription';
 
 describe('Auth API (Stage 1 Backend)', () => {
   beforeAll(async () => {
-    await connectDatabase();
+    await startTestDatabase();
     await User.deleteMany({ email: /@test-stage1\.com$/ });
     await Organization.deleteMany({ email: /@test-stage1\.com$/ });
     await Subscription.deleteMany({});
-  });
+  }, 60000);
 
   afterAll(async () => {
     // Clean up test collections
     await User.deleteMany({ email: /@test-stage1\.com$/ });
     await Organization.deleteMany({ email: /@test-stage1\.com$/ });
     await Subscription.deleteMany({});
-    await disconnectDatabase();
+    await stopTestDatabase();
   });
 
   describe('POST /api/auth/register-owner', () => {
