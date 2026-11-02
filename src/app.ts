@@ -1,3 +1,4 @@
+import './models';
 import express, { Application } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';

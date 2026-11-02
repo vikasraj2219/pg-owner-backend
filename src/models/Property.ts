@@ -79,4 +79,3 @@ PropertySchema.index({ organization: 1, name: 1 }, { unique: true });
 
 export const Property: Model<IProperty> =
   mongoose.models.Property || mongoose.model<IProperty>('Property', PropertySchema);
-

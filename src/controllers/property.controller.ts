@@ -9,6 +9,7 @@ import {
 import { Property } from '../models/Property';
 import { Room } from '../models/Room';
 import { Bed } from '../models/Bed';
+import '../models/Tenant';
 import { Subscription } from '../models/Subscription';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';

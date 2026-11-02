@@ -110,4 +110,3 @@ TenantSchema.index({ organization: 1, phone: 1 });
 
 export const Tenant: Model<ITenant> =
   mongoose.models.Tenant || mongoose.model<ITenant>('Tenant', TenantSchema);
-

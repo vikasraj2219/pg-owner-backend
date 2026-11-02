@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { updateBedStatusSchema } from '../validators/property.validator';
 import { Bed } from '../models/Bed';
+import '../models/Tenant';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
 

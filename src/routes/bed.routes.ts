@@ -13,4 +13,3 @@ router.get('/:id', getBedById);
 router.put('/:id/status', updateBedStatus);
 
 export default router;
-

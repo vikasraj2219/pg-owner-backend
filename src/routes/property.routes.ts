@@ -37,4 +37,3 @@ router.route('/:id/rooms').post(createRoom).get(getPropertyRooms);
 router.put('/:id/rooms/:roomId', updateRoom);
 
 export default router;
-
