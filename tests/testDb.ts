@@ -8,6 +8,9 @@ import { Property } from '../src/models/Property';
 import { Room } from '../src/models/Room';
 import { Bed } from '../src/models/Bed';
 import { Tenant } from '../src/models/Tenant';
+import { BedAssignment } from '../src/models/BedAssignment';
+import { Invoice } from '../src/models/Invoice';
+import { DepositLedger } from '../src/models/DepositLedger';
 
 let replSet: MongoMemoryReplSet | null = null;
 
@@ -27,6 +30,9 @@ export const startTestDatabase = async (): Promise<void> => {
     Room.init(),
     Bed.init(),
     Tenant.init(),
+    BedAssignment.init(),
+    Invoice.init(),
+    DepositLedger.init(),
   ]);
 };
 

@@ -3,6 +3,8 @@ import healthRoutes from './health.routes';
 import authRoutes from './auth.routes';
 import propertyRoutes from './property.routes';
 import bedRoutes from './bed.routes';
+import checkinRoutes from './checkin.routes';
+import tenantRoutes from './tenant.routes';
 
 const router = Router();
 
@@ -11,5 +13,7 @@ router.use('/', healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/properties', propertyRoutes);
 router.use('/beds', bedRoutes);
+router.use('/checkins', checkinRoutes);
+router.use('/tenants', tenantRoutes);
 
 export default router;

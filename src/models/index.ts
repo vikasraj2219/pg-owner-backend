@@ -11,3 +11,11 @@ export { Property, IProperty, PropertyType } from './Property';
 export { Room, IRoom } from './Room';
 export { Bed, IBed, BedStatus } from './Bed';
 export { Tenant, ITenant, TenantStatus, KycDocType } from './Tenant';
+export { BedAssignment, IBedAssignment, BedAssignmentStatus } from './BedAssignment';
+export { Invoice, IInvoice, IInvoiceItem, InvoiceStatus, InvoiceItemCategory } from './Invoice';
+export {
+  DepositLedger,
+  IDepositLedger,
+  DepositTransactionType,
+  PaymentMethod,
+} from './DepositLedger';
