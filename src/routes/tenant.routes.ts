@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getTenants, getTenantById } from '../controllers/tenant.controller';
+import { getTenants, getTenantById, vacateTenant } from '../controllers/tenant.controller';
 import { protect } from '../middleware/auth';
 import { enforceOrgScope } from '../middleware/enforceOrgScope';
 
@@ -11,5 +11,6 @@ router.use(enforceOrgScope);
 
 router.get('/', getTenants);
 router.get('/:id', getTenantById);
+router.post('/:id/vacate', vacateTenant);
 
 export default router;

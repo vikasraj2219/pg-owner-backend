@@ -4,6 +4,7 @@ import { Tenant } from '../models/Tenant';
 import { Invoice } from '../models/Invoice';
 import { DepositLedger } from '../models/DepositLedger';
 import { BedAssignment } from '../models/BedAssignment';
+import { Bed } from '../models/Bed';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
 
@@ -103,6 +104,99 @@ export const getTenantById = async (
         invoices,
         deposits,
         bedHistory,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const vacateTenant = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+    const userId = req.user?.id;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid tenant ID format', 400);
+    }
+
+    const tenant = await Tenant.findOne({ _id: id, organization: orgId });
+    if (!tenant) {
+      throw new AppError('Tenant not found or does not belong to your organization', 404);
+    }
+
+    const {
+      deductionsPaise = 0,
+      refundPaise = 0,
+      paymentMethod = 'cash',
+      notes = 'Checkout settlement',
+    } = req.body;
+
+    // 1. Release assigned bed if any
+    if (tenant.currentBed) {
+      const bed = await Bed.findOne({ _id: tenant.currentBed, organization: orgId });
+      if (bed) {
+        bed.status = 'available';
+        bed.currentTenant = undefined;
+        bed.noticeEndDate = undefined;
+        bed.maintenanceNote = undefined;
+        await bed.save();
+      }
+    }
+
+    // 2. End bed assignment history
+    await BedAssignment.updateMany(
+      { tenant: tenant._id, organization: orgId, status: 'active' },
+      { $set: { status: 'vacated', endDate: new Date(), notes } },
+    );
+
+    // 3. Record refund in DepositLedger if refundPaise > 0
+    if (refundPaise > 0) {
+      await DepositLedger.create({
+        organization: orgId,
+        property: tenant.property,
+        tenant: tenant._id,
+        amountPaise: refundPaise,
+        type: 'refunded',
+        paymentMethod,
+        notes: `Checkout net deposit refund: ${notes}`,
+        recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+        date: new Date(),
+      });
+    }
+
+    // 4. Record deductions if deductionsPaise > 0
+    if (deductionsPaise > 0) {
+      await DepositLedger.create({
+        organization: orgId,
+        property: tenant.property,
+        tenant: tenant._id,
+        amountPaise: deductionsPaise,
+        type: 'deducted',
+        paymentMethod,
+        notes: `Checkout damage/repair deduction: ${notes}`,
+        recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+        date: new Date(),
+      });
+    }
+
+    // 5. Update tenant status to checked_out
+    tenant.status = 'checked_out';
+    tenant.currentBed = undefined;
+    await tenant.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Tenant ${tenant.fullName} successfully vacated and settled.`,
+      data: {
+        tenantId: tenant._id,
+        status: tenant.status,
+        netRefundPaise: refundPaise,
       },
     });
   } catch (error) {
