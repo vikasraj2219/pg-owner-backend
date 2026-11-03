@@ -10,6 +10,7 @@ export interface ITenant extends Document {
   fullName: string;
   phone: string;
   emergencyPhone?: string;
+  email?: string;
   monthlyRentPaise: number; // Integer paise
   depositPaise: number; // Integer paise
   depositPaidPaise: number; // Integer paise
@@ -18,6 +19,8 @@ export interface ITenant extends Document {
   kycDocUrl?: string;
   kycConsent: boolean;
   status: TenantStatus;
+  isDeleted?: boolean;
+  deletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,6 +59,11 @@ const TenantSchema = new Schema<ITenant>(
       type: String,
       trim: true,
     },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
     monthlyRentPaise: {
       type: Number,
       required: true,
@@ -92,6 +100,15 @@ const TenantSchema = new Schema<ITenant>(
       enum: ['active', 'notice_period', 'checked_out'],
       default: 'active',
       index: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
