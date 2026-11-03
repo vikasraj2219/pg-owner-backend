@@ -8,6 +8,9 @@ import tenantRoutes from './tenant.routes';
 import invoiceRoutes from './invoice.routes';
 import paymentRoutes from './payment.routes';
 import dashboardRoutes from './dashboard.routes';
+import checkoutRoutes from './checkout.routes';
+import meterRoutes from './meter.routes';
+import expenseRoutes from './expense.routes';
 
 const router = Router();
 
@@ -21,5 +24,8 @@ router.use('/tenants', tenantRoutes);
 router.use('/invoices', invoiceRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/checkouts', checkoutRoutes);
+router.use('/meters', meterRoutes);
+router.use('/expenses', expenseRoutes);
 
 export default router;

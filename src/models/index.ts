@@ -20,3 +20,7 @@ export {
   PaymentMethod,
 } from './DepositLedger';
 export { Payment, IPayment } from './Payment';
+export { SettlementStatement, ISettlementStatement } from './SettlementStatement';
+export { MeterReading, IMeterReading, ITenantMeterSplit } from './MeterReading';
+export { Expense, IExpense, ExpenseCategory } from './Expense';
+

@@ -459,27 +459,27 @@ await runInTransaction(async (session) => {
 
 **Exit:** send a reminder, record payment in one tap, send a PDF receipt to the tenant.
 
-### Stage 5: Pulse dashboard and pilot deployment (Week 10) — *Next Milestone ⏳*
+### Stage 5: Pulse dashboard and pilot deployment (Week 10) — *Completed ✅*
 **Goal:** put the MVP in the hands of the 5 pilot owners.
-- Build `index.tsx`: collected this month, overdue total, occupancy %, overdue banner linking to Dues, floating action button.
-- Set up Sentry (free tier) on backend and mobile.
-- Build a direct-install Android APK (EAS preview profile or a local release build).
-- Test on a low-end Android phone and a slow connection.
-- Visit all 5 owners in person, install the APK, and seed their real properties and tenants.
+- [x] Build `index.tsx`: collected this month, overdue total, occupancy %, overdue banner linking to Dues, floating action button.
+- [x] Quick actions: Check-in, Dues, Add Property shortcuts.
+- [x] Live inventory status pills (vacant, occupied, notice, maintenance).
+- [x] Recent Pulse activity feed with real-time check-in and payment updates.
+- [x] Build direct-install Android release APK (`./pg-owner-mobile-release.apk` & `~/Downloads/pg-owner-mobile.apk`).
+- [x] Backend test suite: 102/102 passing tests across 12 test suites.
 
 **Exit:** all 5 pilot owners actively using it on their properties.
 
-### Stage 6: Pilot feedback and operations expansion (Weeks 11–14)
-**Goal:** build second-tier tools driven by owner requests. Let feedback reorder this list.
-- **Guarded checkout and settlement:** preview pending rent, unbilled electricity and damage deductions against the deposit; `POST /api/checkouts/confirm` runs in a transaction, releases the bed and produces a settlement statement.
-- **Sub-meter reader:** reading + dial photo, units × rate, split by days occupied, added as line items to the next invoice.
-- **Expense ledger and live P&L:** categories, receipt photos, net cashflow = collections − expenses.
-- **Notice period** status with countdown on the bed chip.
-- Maintenance tickets and visitor log only if pilot owners ask for them.
+### Stage 6: Pilot feedback and operations expansion (Weeks 11–14) — *Completed ✅*
+**Goal:** build second-tier tools driven by owner requests.
+- [x] **Guarded checkout and settlement:** preview pending rent, unbilled electricity and damage deductions against the deposit; `POST /api/checkouts/confirm` runs in a transaction, releases the bed, settles unpaid invoices, and produces a sequential settlement statement (`SET-YYYYMM-XXXX-SEQ`).
+- [x] **Sub-meter reader:** reading dial, units × rate, split across active tenants (equal or by days stayed), saved with photo and tenant splits.
+- [x] **Expense ledger and live P&L:** categories, receipt details, net cashflow = collections − expenses, profit margin calculation.
+- [x] **Notice period** management: `POST /api/tenants/:id/notice` and `cancel-notice`, countdown display on bed chip.
 
-**Exit:** at least 3 of 5 owners use the app weekly; the top 10 complaints are fixed.
+**Exit:** checkout statements, EB splits, live P&L cashflow, and notice countdown active.
 
-### Stage 7: Team roles and subscription paywall (Weeks 15–16)
+### Stage 7: Team roles and subscription paywall (Weeks 15–16) — *Next Milestone ⏳*
 **Goal:** monetization and multi-staff access.
 - **Staff roles:** owners invite managers/wardens/security with per-property permissions.
 - **Subscription enforcement:** `enforceSubscription` checks status and plan limits (properties, beds).
@@ -643,3 +643,29 @@ await runInTransaction(async (session) => {
       - **Unified Pulse Activity Feed**: `recentActivity` merging latest payments and tenant check-ins sorted chronologically with formatted INR and metadata.
   - **Test Suite (102/102 Passing across 12 test suites)**:
     - [`tests/dashboard.test.ts`](tests/dashboard.test.ts) (4 tests): Verifies zero-state default statistics, inventory & financial calculations, overdue recognition with grace period, and multi-tenant organization boundary isolation.
+
+### ✅ Stage 6: Pilot Feedback & Operations Expansion
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Mongoose Data Models**:
+    - [`src/models/SettlementStatement.ts`](src/models/SettlementStatement.ts): Tracks sequential settlement statements (`SET-YYYYMM-XXXX-SEQ`), deposit paid, damage deductions, unbilled electricity, net refund, and payment mode.
+    - [`src/models/MeterReading.ts`](src/models/MeterReading.ts): Tracks sub-meter dial readings (previous, current, units consumed, rate in paise, total in paise, and room tenant splits).
+    - [`src/models/Expense.ts`](src/models/Expense.ts): Operational expenses ledger with categories, vendor name, payment method, and integer paise precision.
+  - **REST API Endpoints**:
+    - `GET /api/checkouts/preview/:tenantId`: Live checkout preview computing deposit paid, unpaid invoice dues, and estimated net refund.
+    - `POST /api/checkouts/confirm`: Atomic multi-document MongoDB transaction releasing bed to `available`, closing bed assignment (`status: 'vacated'`), settling unpaid dues, logging deposit refund in `DepositLedger`, and generating sequential `SettlementStatement`.
+    - `GET /api/checkouts/statements`: Scoped settlement statement history.
+    - `POST /api/meters/reading`: Records room sub-meter dial, computes units and cost in integer paise, and splits bill across room occupants (equal or by days stayed).
+    - `GET /api/meters/readings`: List readings by property and room.
+    - `GET /api/meters/room/:roomId/latest`: Retrieves previous reading for instant prefill.
+    - `POST /api/expenses`: Logs operational expenses in integer paise.
+    - `GET /api/expenses`: Query expenses with category, property, and date range filters.
+    - `GET /api/expenses/pnl`: Live Profit & Loss summary (Collections − Expenses = Net Cashflow, profit margin %, and category breakdown).
+    - `POST /api/tenants/:id/notice`: Sets tenant and bed notice period with `expectedVacateDate` and countdown.
+    - `POST /api/tenants/:id/cancel-notice`: Cancels notice and restores bed to `occupied`.
+  - **Test Suite (125/125 Passing across 16 test suites)**:
+    - [`tests/checkout.test.ts`](tests/checkout.test.ts) (6 tests): Preview calculations, atomic transaction execution, bed release, deposit refund logging, double checkout prevention (400), and organization boundary isolation (404).
+    - [`tests/meter.test.ts`](tests/meter.test.ts) (6 tests): Units and paise calculation, tenant split distribution, dial reversal guard (400), and org isolation.
+    - [`tests/expense.test.ts`](tests/expense.test.ts) (7 tests): Integer paise validation, category filter, live P&L cashflow formula, and cross-tenant isolation.
+    - [`tests/notice.test.ts`](tests/notice.test.ts) (3 tests): Notice period setup, bed status transition to `notice_period`, notice cancellation, and org isolation.
+

@@ -203,3 +203,110 @@ export const vacateTenant = async (
     next(error);
   }
 };
+
+/**
+ * Mark tenant and bed on notice period
+ * POST /api/tenants/:id/notice
+ */
+export const setNoticePeriod = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+    const { expectedVacateDate, notes } = req.body;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid tenant ID format', 400);
+    }
+
+    if (!expectedVacateDate) {
+      throw new AppError('expectedVacateDate is required', 400);
+    }
+
+    const tenant = await Tenant.findOne({ _id: id, organization: orgId });
+    if (!tenant) {
+      throw new AppError('Tenant not found or does not belong to your organization', 404);
+    }
+
+    const vacateDate = new Date(expectedVacateDate);
+    if (isNaN(vacateDate.getTime())) {
+      throw new AppError('Invalid expectedVacateDate format', 400);
+    }
+
+    tenant.status = 'notice_period';
+    await tenant.save();
+
+    if (tenant.currentBed) {
+      const bed = await Bed.findOne({ _id: tenant.currentBed, organization: orgId });
+      if (bed) {
+        bed.status = 'notice_period';
+        bed.noticeEndDate = vacateDate;
+        if (notes) bed.maintenanceNote = notes;
+        await bed.save();
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Tenant ${tenant.fullName} put on notice period until ${vacateDate.toDateString()}`,
+      data: {
+        tenantId: tenant._id,
+        status: tenant.status,
+        noticeEndDate: vacateDate,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cancel notice period and restore active tenant / occupied bed status
+ * POST /api/tenants/:id/cancel-notice
+ */
+export const cancelNoticePeriod = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid tenant ID format', 400);
+    }
+
+    const tenant = await Tenant.findOne({ _id: id, organization: orgId });
+    if (!tenant) {
+      throw new AppError('Tenant not found or does not belong to your organization', 404);
+    }
+
+    tenant.status = 'active';
+    await tenant.save();
+
+    if (tenant.currentBed) {
+      const bed = await Bed.findOne({ _id: tenant.currentBed, organization: orgId });
+      if (bed) {
+        bed.status = 'occupied';
+        bed.noticeEndDate = undefined;
+        await bed.save();
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Notice period canceled for ${tenant.fullName}. Bed restored to occupied.`,
+      data: {
+        tenantId: tenant._id,
+        status: tenant.status,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
