@@ -9,3 +9,4 @@
 * **Integer Paise Everywhere**: Every monetary value (`rentPaise`, `depositPaise`, `balancePaise`, `subtotalPaise`, `totalPaise`) is calculated and stored strictly in integer paise (100 paise = ₹1.00). Format to ₹ with currency helpers only at presentation/UI layers.
 * **Strict Tenant Scoping**: Every query, mutation, and aggregation must be strictly scoped by organization (`organization: req.orgId`).
 * **Compliance & Privacy**: Aadhaar numbers must be masked (`XXXX-XXXX-1234`) storing only the last 4 digits, and DPDP Act 2023 tenant consent is strictly required for check-in.
+

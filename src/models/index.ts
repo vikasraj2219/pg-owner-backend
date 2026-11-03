@@ -19,3 +19,4 @@ export {
   DepositTransactionType,
   PaymentMethod,
 } from './DepositLedger';
+export { Payment, IPayment } from './Payment';

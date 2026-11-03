@@ -442,23 +442,24 @@ await runInTransaction(async (session) => {
 
 **Exit:** tap a green bed, snap an ID, submit → bed turns red and the prorated invoice exists.
 
-### Stage 4: Collections, WhatsApp and receipts (Weeks 8–9) — *Next Milestone ⏳*
+### Stage 4: Collections, WhatsApp and receipts (Weeks 8–9) — *Completed ✅*
 **Goal:** monthly billing, 1-tap reminders, instant receipts.
 
-*Backend (Upcoming ⏳)*
-- [ ] `POST /api/invoices/generate-monthly`: idempotent, secret-header protected; run it from a scheduled GitHub Action. Running it twice must create no duplicates.
-- [ ] `POST /api/payments/mark-paid`: updates the balance, supports partial payments, logs the payment, generates a sequential receipt number (`RCP-YYYYMM-XXXX`).
-- [ ] `GET /api/invoices`: list receivables with filter support (overdue, unpaid, paid).
+*Backend (Completed ✅)*
+- [x] `POST /api/invoices/generate-monthly`: idempotent, secret-header (`x-cron-secret`) protected; scheduled GitHub Action or authenticated owner trigger. Running it twice creates no duplicates.
+- [x] `POST /api/invoices/:id/pay`: updates balance, supports partial and full payments, logs payment in `Payment` ledger, generates sequential receipt number (`RCP-YYYYMM-XXXX`).
+- [x] `GET /api/invoices`: list receivables with filter support (overdue, unpaid, paid, search) and automatic grace period overdue calculation.
+- [x] `GET /api/payments`: list recorded payments and receipts scoped strictly by organization.
 
-*Mobile (Upcoming ⏳)*
-- [ ] `dues.tsx` with filters: Overdue (>5 days), Unpaid, Paid.
-- [ ] WhatsApp button builds a `wa.me` link with name, bed, amount and the owner's UPI ID.
-- [ ] UPI QR modal with `react-native-qrcode-svg`, shared as an image via the share sheet.
-- [ ] "Mark received" button, then a PDF receipt via `expo-print` + `expo-sharing`.
+*Mobile (Completed ✅)*
+- [x] `dues.tsx` with filters: Overdue (>5 days), Unpaid, Paid, All, plus instant search.
+- [x] WhatsApp button builds a `wa.me` link with tenant name, bed, due amount, and owner's UPI ID.
+- [x] UPI QR modal (`DynamicUpiQrModal`) presented directly from each unpaid card.
+- [x] `RecordPaymentModal.tsx` records payment mode (UPI/Cash/Bank), partial/full payment, and generates/shares branded PDF receipt via `expo-print` + `expo-sharing`.
 
 **Exit:** send a reminder, record payment in one tap, send a PDF receipt to the tenant.
 
-### Stage 5: Pulse dashboard and pilot deployment (Week 10)
+### Stage 5: Pulse dashboard and pilot deployment (Week 10) — *Next Milestone ⏳*
 **Goal:** put the MVP in the hands of the 5 pilot owners.
 - Build `index.tsx`: collected this month, overdue total, occupancy %, overdue banner linking to Dues, floating action button.
 - Set up Sentry (free tier) on backend and mobile.
@@ -614,3 +615,19 @@ await runInTransaction(async (session) => {
   - **Test Suite (84/84 Passing across 10 test suites)**:
     - [`tests/proration.test.ts`](tests/proration.test.ts) (15 tests): Full calendar matrix verification (31-day, 30-day, 28-day, 29-day leap years, day 1, day 15, day 28/29/30/31).
     - [`tests/checkin.test.ts`](tests/checkin.test.ts) (8 tests): Atomic transaction rollback on failure, proration invoice generation, DPDP consent enforcement, 409 double check-in prevention, and organization isolation.
+
+### ✅ Stage 4: Collections, WhatsApp and Receipts
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Mongoose Data Models & Registration**:
+    - [`src/models/Payment.ts`](src/models/Payment.ts): Payment ledger tracking organization, property, tenant, invoice, sequential receipt number (`RCP-YYYYMM-XXXX`), integer paise amount, payment method (`cash` | `upi` | `bank_transfer`), transaction reference, payment date, and recording user.
+    - Registered in [`src/models/index.ts`](src/models/index.ts).
+  - **Sequential Receipt Numbering Engine**:
+    - [`src/services/receiptNumber.service.ts`](src/services/receiptNumber.service.ts): Generates collision-resistant, month-scoped sequential receipt IDs (`RCP-YYYYMM-XXXX-SEQ`).
+  - **REST API Endpoints & Idempotent Invoicing**:
+    - `POST /api/invoices/generate-monthly`: Protected by `x-cron-secret` header or JWT session; generates monthly invoices across active tenant assignments, guarantees strict idempotency (0 duplicate invoices on multiple runs).
+    - `POST /api/invoices/:id/pay`: Multi-mode payment recording supporting full and partial payments, balances, status transitions (`unpaid` → `partially_paid` → `paid`), receipt creation, and overpayment guards.
+    - `GET /api/invoices`: Full receivables query endpoint with `propertyId`, `status` (`all`, `overdue`, `unpaid`, `paid`), `search`, and dynamic `overdueDays` calculation using organization `gracePeriodDays`.
+    - `GET /api/payments`: Scoped payment and receipt history query endpoint.
+  - **Test Suite (98/98 Passing across 11 test suites)**:
+    - [`tests/invoice.test.ts`](tests/invoice.test.ts) (14 tests): Verifies monthly generation idempotency, cron secret execution, overdue calculation, partial payment status updates, full payment completion, sequential receipt numbering, overpayment prevention, and cross-tenant security.

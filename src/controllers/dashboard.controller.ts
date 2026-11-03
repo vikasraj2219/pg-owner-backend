@@ -41,7 +41,11 @@ export const getDashboardStats = async (
       Bed.countDocuments({ ...bedQuery, status: 'occupied' }),
       Bed.countDocuments({ ...bedQuery, status: 'available' }),
       Room.countDocuments(bedQuery),
-      Tenant.find({ organization: orgId, status: 'active', ...(propertyIds.length > 0 ? { property: { $in: propertyIds } } : {}) }),
+      Tenant.find({
+        organization: orgId,
+        status: 'active',
+        ...(propertyIds.length > 0 ? { property: { $in: propertyIds } } : {}),
+      }),
     ]);
 
     const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 1000) / 10 : 0;
