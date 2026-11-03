@@ -152,17 +152,14 @@ describe('Expense Ledger & Live P&L API (Stage 6 Backend)', () => {
       createdExpenseId = res.body.data._id;
 
       // Add a second expense: wifi bill ₹1,500
-      await request(app)
-        .post('/api/expenses')
-        .set('Authorization', `Bearer ${orgAToken}`)
-        .send({
-          propertyId: propertyAId,
-          category: 'wifi',
-          amountPaise: 150000,
-          description: 'Airtel Fiber monthly bill',
-          paidTo: 'Airtel',
-          paymentMethod: 'upi',
-        });
+      await request(app).post('/api/expenses').set('Authorization', `Bearer ${orgAToken}`).send({
+        propertyId: propertyAId,
+        category: 'wifi',
+        amountPaise: 150000,
+        description: 'Airtel Fiber monthly bill',
+        paidTo: 'Airtel',
+        paymentMethod: 'upi',
+      });
     });
 
     it('rejects invalid expense category with 400', async () => {

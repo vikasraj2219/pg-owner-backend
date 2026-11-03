@@ -9,6 +9,7 @@ export interface IUser extends Document {
   password?: string;
   role: 'owner' | 'manager' | 'staff';
   status: 'active' | 'inactive';
+  assignedProperties?: Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -60,6 +61,12 @@ const UserSchema = new Schema<IUser>(
       default: 'active',
       required: true,
     },
+    assignedProperties: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'Property',
+      },
+    ],
   },
   {
     timestamps: true,

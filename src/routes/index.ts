@@ -11,12 +11,21 @@ import dashboardRoutes from './dashboard.routes';
 import checkoutRoutes from './checkout.routes';
 import meterRoutes from './meter.routes';
 import expenseRoutes from './expense.routes';
+import teamRoutes from './team.routes';
+import subscriptionRoutes from './subscription.routes';
+import { enforceSubscription } from '../middleware/enforceSubscription';
 
 const router = Router();
 
-// Mount sub-routes
+// Mount public sub-routes
 router.use('/', healthRoutes);
 router.use('/auth', authRoutes);
+router.use('/subscription', subscriptionRoutes);
+
+// Apply subscription paywall to subsequent routes
+router.use(enforceSubscription);
+
+// Protected routes
 router.use('/properties', propertyRoutes);
 router.use('/beds', bedRoutes);
 router.use('/checkins', checkinRoutes);
@@ -27,5 +36,6 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/checkouts', checkoutRoutes);
 router.use('/meters', meterRoutes);
 router.use('/expenses', expenseRoutes);
+router.use('/team', teamRoutes);
 
 export default router;

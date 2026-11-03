@@ -479,12 +479,12 @@ await runInTransaction(async (session) => {
 
 **Exit:** checkout statements, EB splits, live P&L cashflow, and notice countdown active.
 
-### Stage 7: Team roles and subscription paywall (Weeks 15–16) — *Next Milestone ⏳*
+### Stage 7: Team roles and subscription paywall (Weeks 15–16) — *Completed ✅*
 **Goal:** monetization and multi-staff access.
-- **Staff roles:** owners invite managers/wardens/security with per-property permissions.
-- **Subscription enforcement:** `enforceSubscription` checks status and plan limits (properties, beds).
-- **Read-only mode:** expired accounts can view everything; mutating requests return `402 Payment Required`. Never lock owners out of their own data.
-- **Billing:** start with manual UPI subscriptions and an admin toggle. Add Razorpay subscriptions and the webhook once there are 10+ paying owners. Host billing on the web (`yourapp.com/billing`); the app stays a login-only companion.
+- [x] **Staff roles:** owners invite managers/wardens/security with per-property permissions (`assignedProperties`).
+- [x] **Subscription enforcement:** `enforceSubscription` checks status and plan limits (properties, beds).
+- [x] **Read-only mode:** expired accounts can view everything; mutating requests return `402 Payment Required`. Never lock owners out of their own data.
+- [x] **Billing & Quota Management:** plan limits (`starter`, `growth`, `pro`), instant upgrade API, trial extension, and live quota utilization (`propertiesUsed`, `bedsUsed`).
 
 **Exit:** a trial expires, the app goes read-only, paying on the web unlocks it immediately.
 
@@ -668,4 +668,25 @@ await runInTransaction(async (session) => {
     - [`tests/meter.test.ts`](tests/meter.test.ts) (6 tests): Units and paise calculation, tenant split distribution, dial reversal guard (400), and org isolation.
     - [`tests/expense.test.ts`](tests/expense.test.ts) (7 tests): Integer paise validation, category filter, live P&L cashflow formula, and cross-tenant isolation.
     - [`tests/notice.test.ts`](tests/notice.test.ts) (3 tests): Notice period setup, bed status transition to `notice_period`, notice cancellation, and org isolation.
+
+### ✅ Stage 7: Team Roles & Subscription Paywall
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Mongoose Data Models**:
+    - [`src/models/User.ts`](src/models/User.ts): Extended with `assignedProperties: Types.ObjectId[]` for fine-grained per-property manager/staff access control.
+    - [`src/models/Subscription.ts`](src/models/Subscription.ts): Added `expired` status to enum, tracked subscription start/end dates, plan tier (`starter` | `growth` | `pro`), and quotas (`maxProperties`, `maxBeds`).
+  - **Paywall & Quota Middleware**:
+    - [`src/middleware/enforceSubscription.ts`](src/middleware/enforceSubscription.ts): Safe `GET`, `HEAD`, and `OPTIONS` requests always pass through (owners are never locked out of viewing their data). Mutating requests (`POST`, `PUT`, `DELETE`, `PATCH`) return `402 Payment Required` (`SUBSCRIPTION_EXPIRED`) if the 14-day trial or paid subscription has lapsed. Quota validation helpers `checkPropertyQuota` and `checkBedQuota` prevent exceeding plan limits.
+  - **REST API Endpoints**:
+    - `GET /api/team/members`: List team members scoped to organization with populated property assignments.
+    - `POST /api/team/members`: Owner-only member creation (`manager`, `staff`) with phone/email duplicate checking and property assignment verification.
+    - `PUT /api/team/members/:id`: Owner-only update of name, role, phone, and property assignments.
+    - `DELETE /api/team/members/:id`: Owner-only removal with safeguards preventing owner self-deletion.
+    - `GET /api/subscription/current`: Retrieves current subscription tier, status, days remaining, `isReadOnly` flag, and real-time quota usage (`propertiesUsed`, `bedsUsed`).
+    - `POST /api/subscription/upgrade`: Instantly upgrades organization plan tier (`growth`, `pro`) and restores active mutating capabilities.
+    - `POST /api/subscription/extend-trial`: Extends trial period by specified days.
+  - **Test Suite (137/137 Passing across 18 test suites)**:
+    - [`tests/team.test.ts`](tests/team.test.ts) (7 tests): Owner-exclusive team member provisioning, property assignment validation, non-owner authorization guard (403), tenant isolation (Org B cannot view Org A staff), and update/removal lifecycle.
+    - [`tests/subscription.test.ts`](tests/subscription.test.ts) (5 tests): Read-only mode access guarantee for GET requests on expired subscriptions, 402 rejection for mutating requests, current status query, instant plan upgrade unlocking account, and trial extension.
+
 

@@ -2,14 +2,7 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import {
-  Tenant,
-  Bed,
-  BedAssignment,
-  Invoice,
-  DepositLedger,
-  SettlementStatement,
-} from '../models';
+import { Tenant, Bed, BedAssignment, Invoice, DepositLedger, SettlementStatement } from '../models';
 import { checkoutConfirmSchema } from '../validators/checkout.validator';
 import { generateSettlementNumber } from '../services/settlementNumber.service';
 
@@ -300,7 +293,11 @@ export const getSettlementStatements = async (
     const { propertyId } = req.query;
 
     const query: Record<string, unknown> = { organization: orgId };
-    if (propertyId && typeof propertyId === 'string' && mongoose.Types.ObjectId.isValid(propertyId)) {
+    if (
+      propertyId &&
+      typeof propertyId === 'string' &&
+      mongoose.Types.ObjectId.isValid(propertyId)
+    ) {
       query.property = propertyId;
     }
 

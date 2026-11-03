@@ -75,7 +75,11 @@ export const getExpenses = async (
 
     const query: Record<string, unknown> = { organization: orgId };
 
-    if (propertyId && typeof propertyId === 'string' && mongoose.Types.ObjectId.isValid(propertyId)) {
+    if (
+      propertyId &&
+      typeof propertyId === 'string' &&
+      mongoose.Types.ObjectId.isValid(propertyId)
+    ) {
       query.property = propertyId;
     }
     if (category && typeof category === 'string') {
@@ -138,7 +142,11 @@ export const getPnLSummary = async (
       date: { $gte: startOfMonth, $lte: endOfMonth },
     };
 
-    if (propertyId && typeof propertyId === 'string' && mongoose.Types.ObjectId.isValid(propertyId)) {
+    if (
+      propertyId &&
+      typeof propertyId === 'string' &&
+      mongoose.Types.ObjectId.isValid(propertyId)
+    ) {
       paymentQuery.property = propertyId;
       expenseQuery.property = propertyId;
     }
@@ -178,7 +186,8 @@ export const getPnLSummary = async (
         collectionsPaise,
         expensesPaise,
         netCashflowPaise,
-        profitMarginRate: collectionsPaise > 0 ? Number((netCashflowPaise / collectionsPaise).toFixed(4)) : 0,
+        profitMarginRate:
+          collectionsPaise > 0 ? Number((netCashflowPaise / collectionsPaise).toFixed(4)) : 0,
         categoryBreakdown,
         totalExpensesCount: expenses.length,
         totalPaymentsCount: payments.length,

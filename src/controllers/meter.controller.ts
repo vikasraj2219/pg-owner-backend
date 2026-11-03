@@ -42,8 +42,7 @@ export const recordReading = async (
     }
 
     const unitsConsumed = currentReading - previousReading;
-    const effectiveRatePaise =
-      ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 1000; // default ₹10/unit
+    const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 1000; // default ₹10/unit
     const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
 
     // Find all active tenants in this room
@@ -150,7 +149,11 @@ export const getReadings = async (
     const { propertyId, roomId } = req.query;
 
     const query: Record<string, unknown> = { organization: orgId };
-    if (propertyId && typeof propertyId === 'string' && mongoose.Types.ObjectId.isValid(propertyId)) {
+    if (
+      propertyId &&
+      typeof propertyId === 'string' &&
+      mongoose.Types.ObjectId.isValid(propertyId)
+    ) {
       query.property = propertyId;
     }
     if (roomId && typeof roomId === 'string' && mongoose.Types.ObjectId.isValid(roomId)) {

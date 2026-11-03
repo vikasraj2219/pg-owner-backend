@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export type PlanType = 'starter' | 'growth' | 'pro';
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled';
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
 
 export interface ISubscription extends Document {
   organization: Types.ObjectId;
@@ -38,7 +38,7 @@ const SubscriptionSchema = new Schema<ISubscription>(
     },
     status: {
       type: String,
-      enum: ['trialing', 'active', 'past_due', 'canceled'],
+      enum: ['trialing', 'active', 'past_due', 'canceled', 'expired'],
       default: 'trialing',
       required: true,
     },

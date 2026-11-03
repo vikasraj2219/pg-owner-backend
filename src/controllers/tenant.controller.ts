@@ -309,4 +309,3 @@ export const cancelNoticePeriod = async (
     next(error);
   }
 };
-
