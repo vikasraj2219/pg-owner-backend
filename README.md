@@ -631,3 +631,15 @@ await runInTransaction(async (session) => {
     - `GET /api/payments`: Scoped payment and receipt history query endpoint.
   - **Test Suite (98/98 Passing across 11 test suites)**:
     - [`tests/invoice.test.ts`](tests/invoice.test.ts) (14 tests): Verifies monthly generation idempotency, cron secret execution, overdue calculation, partial payment status updates, full payment completion, sequential receipt numbering, overpayment prevention, and cross-tenant security.
+
+### ✅ Stage 5: Pulse Dashboard & Pilot Deployment
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **REST API & Pulse Analytics**:
+    - `GET /api/dashboard/stats`: Expanded dashboard analytics supporting optional `propertyId` filtering or aggregate portfolio stats:
+      - **Bed Inventory Breakdown**: `totalBeds`, `occupiedBeds`, `availableBeds`, `maintenanceBeds`, `noticeBeds`, `totalRooms`, `occupancyRate`.
+      - **Financial Health in Integer Paise**: `collectedThisMonthPaise`, `expectedThisMonthPaise`, `pendingAmountPaise`, `collectionRate`, `netProfitPaise`.
+      - **Grace-Period Bounded Overdue Tracking**: `overdueCount`, `overdueAmountPaise` considering organization `gracePeriodDays`.
+      - **Unified Pulse Activity Feed**: `recentActivity` merging latest payments and tenant check-ins sorted chronologically with formatted INR and metadata.
+  - **Test Suite (102/102 Passing across 12 test suites)**:
+    - [`tests/dashboard.test.ts`](tests/dashboard.test.ts) (4 tests): Verifies zero-state default statistics, inventory & financial calculations, overdue recognition with grace period, and multi-tenant organization boundary isolation.
