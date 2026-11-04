@@ -24,8 +24,8 @@ This repository includes a [`render.yaml`](../render.yaml) blueprint specificati
    - **Environment**: `Node`
    - **Region**: `Singapore` (lowest latency for India)
    - **Plan**: `Free`
-   - **Build Command**: `npm install --include=dev && npm run build`
-   - **Start Command**: `npm start`
+   - **Build Command**: `npm install --omit=dev`
+   - **Start Command**: `node --max-old-space-size=450 dist/server.js`
    - **Health Check**: `/api/health`
 5. Under **Environment Variables**:
    - `MONGODB_URI`: Paste your MongoDB Atlas connection string:
@@ -49,8 +49,8 @@ If deploying manually without Blueprint:
    - **Branch**: `main`
    - **Root Directory**: *(leave blank)*
    - **Runtime**: `Node`
-   - **Build Command**: `npm install --include=dev && npm run build`
-   - **Start Command**: `npm start`
+   - **Build Command**: `npm install --omit=dev`
+   - **Start Command**: `node --max-old-space-size=450 dist/server.js`
    - **Instance Type**: `Free`
 4. Expand **Advanced** -> **Health Check Path**:
    - Set to `/api/health`
@@ -59,6 +59,7 @@ If deploying manually without Blueprint:
 | Key | Recommended Value | Notes |
 | :--- | :--- | :--- |
 | `NODE_ENV` | `production` | Enables production optimizations |
+| `NODE_OPTIONS` | `--max-old-space-size=450` | Prevents 512MB RAM heap allocation crashes |
 | `API_PREFIX` | `/api` | Base path for all routes |
 | `MONGODB_URI` | `mongodb+srv://...` | Your MongoDB Atlas connection URI |
 | `JWT_SECRET` | *(Random 32+ character string)* | Token signing secret |

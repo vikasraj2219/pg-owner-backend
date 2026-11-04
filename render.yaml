@@ -4,12 +4,14 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: npm install --include=dev && npm run build
-    startCommand: npm start
+    buildCommand: npm install --omit=dev
+    startCommand: node --max-old-space-size=450 dist/server.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=450"
       - key: API_PREFIX
         value: /api
       - key: MONGODB_URI
