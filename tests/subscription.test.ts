@@ -147,3 +147,4 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
     });
   });
 });
+
