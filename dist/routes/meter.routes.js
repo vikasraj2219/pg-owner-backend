@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../middleware/auth");
+const enforceOrgScope_1 = require("../middleware/enforceOrgScope");
+const meter_controller_1 = require("../controllers/meter.controller");
+const router = (0, express_1.Router)();
+router.use(auth_1.protect);
+router.use(enforceOrgScope_1.enforceOrgScope);
+router.post('/reading', meter_controller_1.recordReading);
+router.get('/readings', meter_controller_1.getReadings);
+router.get('/room/:roomId/latest', meter_controller_1.getLatestRoomReading);
+exports.default = router;

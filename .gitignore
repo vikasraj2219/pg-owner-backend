@@ -6,7 +6,6 @@ yarn-error.log*
 package-lock.json.bak
 
 # Production build
-dist/
 build/
 
 # Environment files

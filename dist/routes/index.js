@@ -1,0 +1,43 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const health_routes_1 = __importDefault(require("./health.routes"));
+const auth_routes_1 = __importDefault(require("./auth.routes"));
+const property_routes_1 = __importDefault(require("./property.routes"));
+const bed_routes_1 = __importDefault(require("./bed.routes"));
+const checkin_routes_1 = __importDefault(require("./checkin.routes"));
+const tenant_routes_1 = __importDefault(require("./tenant.routes"));
+const invoice_routes_1 = __importDefault(require("./invoice.routes"));
+const payment_routes_1 = __importDefault(require("./payment.routes"));
+const dashboard_routes_1 = __importDefault(require("./dashboard.routes"));
+const checkout_routes_1 = __importDefault(require("./checkout.routes"));
+const meter_routes_1 = __importDefault(require("./meter.routes"));
+const expense_routes_1 = __importDefault(require("./expense.routes"));
+const team_routes_1 = __importDefault(require("./team.routes"));
+const subscription_routes_1 = __importDefault(require("./subscription.routes"));
+const upload_routes_1 = __importDefault(require("./upload.routes"));
+const enforceSubscription_1 = require("../middleware/enforceSubscription");
+const router = (0, express_1.Router)();
+// Mount public sub-routes
+router.use('/', health_routes_1.default);
+router.use('/auth', auth_routes_1.default);
+router.use('/subscription', subscription_routes_1.default);
+// Apply subscription paywall to subsequent routes
+router.use(enforceSubscription_1.enforceSubscription);
+// Protected routes
+router.use('/properties', property_routes_1.default);
+router.use('/beds', bed_routes_1.default);
+router.use('/checkins', checkin_routes_1.default);
+router.use('/tenants', tenant_routes_1.default);
+router.use('/invoices', invoice_routes_1.default);
+router.use('/payments', payment_routes_1.default);
+router.use('/dashboard', dashboard_routes_1.default);
+router.use('/checkouts', checkout_routes_1.default);
+router.use('/meters', meter_routes_1.default);
+router.use('/expenses', expense_routes_1.default);
+router.use('/team', team_routes_1.default);
+router.use('/uploads', upload_routes_1.default);
+exports.default = router;

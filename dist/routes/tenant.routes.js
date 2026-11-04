@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const tenant_controller_1 = require("../controllers/tenant.controller");
+const auth_1 = require("../middleware/auth");
+const enforceOrgScope_1 = require("../middleware/enforceOrgScope");
+const router = (0, express_1.Router)();
+// Protect all tenant routes with JWT authentication and organization context
+router.use(auth_1.protect);
+router.use(enforceOrgScope_1.enforceOrgScope);
+router.get('/', tenant_controller_1.getTenants);
+router.get('/:id', tenant_controller_1.getTenantById);
+router.put('/:id', tenant_controller_1.updateTenant);
+router.post('/:id/move-bed', tenant_controller_1.moveBed);
+router.delete('/:id', tenant_controller_1.deleteTenant);
+router.post('/:id/restore', tenant_controller_1.restoreTenant);
+router.post('/:id/vacate', tenant_controller_1.vacateTenant);
+router.post('/:id/notice', tenant_controller_1.setNoticePeriod);
+router.post('/:id/cancel-notice', tenant_controller_1.cancelNoticePeriod);
+exports.default = router;

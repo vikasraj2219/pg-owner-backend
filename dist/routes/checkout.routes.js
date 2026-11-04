@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../middleware/auth");
+const enforceOrgScope_1 = require("../middleware/enforceOrgScope");
+const checkout_controller_1 = require("../controllers/checkout.controller");
+const router = (0, express_1.Router)();
+router.use(auth_1.protect);
+router.use(enforceOrgScope_1.enforceOrgScope);
+router.get('/preview/:tenantId', checkout_controller_1.getCheckoutPreview);
+router.post('/confirm', checkout_controller_1.confirmCheckout);
+router.get('/statements', checkout_controller_1.getSettlementStatements);
+router.get('/statements/:id', checkout_controller_1.getSettlementStatementById);
+exports.default = router;
