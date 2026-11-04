@@ -9,12 +9,14 @@ import {
   verifyRazorpayPayment,
   createRazorpayPaymentLink,
   handleRazorpayWebhook,
+  handlePaymentLinkCallback,
 } from '../controllers/subscription.controller';
 
 const router = Router();
 
-// Public webhook route (called by Razorpay servers)
+// Public routes (called by Razorpay servers & browser redirects)
 router.post('/webhook', handleRazorpayWebhook);
+router.get('/callback', handlePaymentLinkCallback);
 
 // Authenticated & organization-scoped routes
 router.use(protect);

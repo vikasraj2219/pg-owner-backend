@@ -166,13 +166,20 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
         .set('Authorization', `Bearer ${orgAToken}`)
         .send({ plan: 'pro' });
 
+      const paymentId = 'pay_test_123';
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'YuO4zCPfnhfbXrj9Lx3HpaKT';
+      const validSignature = require('crypto')
+        .createHmac('sha256', keySecret)
+        .update(`${orderRes.body.data.orderId}|${paymentId}`)
+        .digest('hex');
+
       const res = await request(app)
         .post('/api/subscription/verify')
         .set('Authorization', `Bearer ${orgAToken}`)
         .send({
           razorpay_order_id: orderRes.body.data.orderId,
-          razorpay_payment_id: 'pay_test_123',
-          razorpay_signature: 'sig_test_123',
+          razorpay_payment_id: paymentId,
+          razorpay_signature: validSignature,
           plan: 'pro',
         });
 

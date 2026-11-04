@@ -5,8 +5,9 @@ const auth_1 = require("../middleware/auth");
 const enforceOrgScope_1 = require("../middleware/enforceOrgScope");
 const subscription_controller_1 = require("../controllers/subscription.controller");
 const router = (0, express_1.Router)();
-// Public webhook route (called by Razorpay servers)
+// Public routes (called by Razorpay servers & browser redirects)
 router.post('/webhook', subscription_controller_1.handleRazorpayWebhook);
+router.get('/callback', subscription_controller_1.handlePaymentLinkCallback);
 // Authenticated & organization-scoped routes
 router.use(auth_1.protect);
 router.use(enforceOrgScope_1.enforceOrgScope);

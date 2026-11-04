@@ -358,7 +358,7 @@ export const createRazorpayPaymentLink = async (
             orgId: orgId.toString(),
             plan,
           },
-          callback_url: 'pgowner://subscription',
+          callback_url: 'https://pg-owner-backend.onrender.com/api/subscription/callback',
           callback_method: 'get',
         }),
       });
@@ -470,6 +470,50 @@ export const handleRazorpayWebhook = async (
     }
 
     res.status(200).json({ received: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Handle Razorpay Payment Link Browser Callback & Redirect to App
+ * GET /api/subscription/callback
+ */
+export const handlePaymentLinkCallback = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { razorpay_payment_id, razorpay_payment_link_status } = req.query;
+    const isPaid = razorpay_payment_link_status === 'paid' || !!razorpay_payment_id;
+
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Nilaaya - Subscription Payment</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #F8F9FA; text-align: center; padding: 20px; }
+            .card { background: white; border-radius: 20px; padding: 32px 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 360px; width: 100%; }
+            .icon { width: 64px; height: 64px; border-radius: 50%; background: #ECFDF5; color: #0A6C50; display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 16px; font-weight: bold; }
+            h2 { color: #0F172A; margin: 0 0 8px; font-size: 20px; font-weight: 800; }
+            p { color: #64748B; font-size: 14px; margin: 0 0 24px; line-height: 1.5; }
+            .btn { background: #0A6C50; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 15px; display: block; }
+          </style>
+          <meta http-equiv="refresh" content="1;url=pgowner://subscription" />
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">✓</div>
+            <h2>${isPaid ? 'Payment Confirmed!' : 'Processing Payment'}</h2>
+            <p>${isPaid ? 'Your subscription payment has been received. Returning you to the Nilaaya app...' : 'Please return to Nilaaya to check your status.'}</p>
+            <a class="btn" href="pgowner://subscription">Open Nilaaya App</a>
+          </div>
+        </body>
+      </html>
+    `);
   } catch (error) {
     next(error);
   }
