@@ -689,4 +689,23 @@ await runInTransaction(async (session) => {
     - [`tests/team.test.ts`](tests/team.test.ts) (7 tests): Owner-exclusive team member provisioning, property assignment validation, non-owner authorization guard (403), tenant isolation (Org B cannot view Org A staff), and update/removal lifecycle.
     - [`tests/subscription.test.ts`](tests/subscription.test.ts) (5 tests): Read-only mode access guarantee for GET requests on expired subscriptions, 402 rejection for mutating requests, current status query, instant plan upgrade unlocking account, and trial extension.
 
+### ✅ Cloudinary Storage & KYC File Viewer
+- **Status**: Completed & Verified
+- **Deliverables**:
+  - **Cloudinary Integration ([`src/config/cloudinary.ts`](src/config/cloudinary.ts) & [`src/services/cloudinary.service.ts`](src/services/cloudinary.service.ts))**:
+    - Full Cloudinary SDK configuration using `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`.
+    - Buffer upload via `cloudinary.uploader.upload_stream` under isolated tenant directory `pg-owner/${orgId}/kyc`.
+    - Automatic quality optimization (`quality: 'auto:good'`), returning HTTPS CDN `secure_url`, `public_id`, format, and dimensions.
+    - Safe deletion helper `deleteFromCloudinary`.
+  - **Multipart Middleware ([`src/middleware/upload.middleware.ts`](src/middleware/upload.middleware.ts))**:
+    - In-memory buffer storage with 10MB file size limit.
+    - Multi-mime validation: JPEG, PNG, WEBP, and PDF.
+  - **REST API Endpoints**:
+    - `POST /api/uploads/kyc`: Authenticated multipart upload for tenant ID proof & KYC documents.
+    - `GET /api/uploads/status`: Verifies storage service provider and configuration status.
+    - `DELETE /api/uploads/:publicId`: Scoped document deletion with strict cross-organization isolation guards.
+  - **Test Suite (144/144 Passing across 19 test suites)**:
+    - [`tests/upload.test.ts`](tests/upload.test.ts) (7 tests): Storage status verification, unauthenticated upload rejection (401), image buffer upload returning Cloudinary CDN secure URL, missing file rejection (400), malicious file format rejection (400), cross-tenant deletion guard (403), and valid document deletion.
+
+
 

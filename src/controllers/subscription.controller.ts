@@ -154,4 +154,3 @@ export const extendTrial = async (
     next(error);
   }
 };
-

@@ -13,6 +13,7 @@ import meterRoutes from './meter.routes';
 import expenseRoutes from './expense.routes';
 import teamRoutes from './team.routes';
 import subscriptionRoutes from './subscription.routes';
+import uploadRoutes from './upload.routes';
 import { enforceSubscription } from '../middleware/enforceSubscription';
 
 const router = Router();
@@ -37,5 +38,6 @@ router.use('/checkouts', checkoutRoutes);
 router.use('/meters', meterRoutes);
 router.use('/expenses', expenseRoutes);
 router.use('/team', teamRoutes);
+router.use('/uploads', uploadRoutes);
 
 export default router;

@@ -19,4 +19,3 @@ router.put('/members/:id', updateTeamMember);
 router.delete('/members/:id', removeTeamMember);
 
 export default router;
-

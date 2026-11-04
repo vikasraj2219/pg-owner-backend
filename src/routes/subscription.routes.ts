@@ -17,4 +17,3 @@ router.post('/upgrade', upgradeSubscription);
 router.post('/extend-trial', extendTrial);
 
 export default router;
-
