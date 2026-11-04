@@ -27,6 +27,9 @@ const envSchema = zod_1.z.object({
     CLOUDINARY_CLOUD_NAME: zod_1.z.string().optional().default(''),
     CLOUDINARY_API_KEY: zod_1.z.string().optional().default(''),
     CLOUDINARY_API_SECRET: zod_1.z.string().optional().default(''),
+    RAZORPAY_KEY_ID: zod_1.z.string().optional().default(''),
+    RAZORPAY_KEY_SECRET: zod_1.z.string().optional().default(''),
+    RAZORPAY_WEBHOOK_SECRET: zod_1.z.string().optional().default(''),
 });
 const parseEnv = () => {
     const result = envSchema.safeParse(process.env);

@@ -145,5 +145,53 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
       expect(res.body.success).toBe(true);
       expect(res.body.data.status).toBe('trialing');
     });
+
+    it('POST /api/subscription/create-order creates Razorpay subscription order', async () => {
+      const res = await request(app)
+        .post('/api/subscription/create-order')
+        .set('Authorization', `Bearer ${orgAToken}`)
+        .send({ plan: 'growth' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.amount).toBe(99900);
+      expect(res.body.data.currency).toBe('INR');
+      expect(res.body.data.plan).toBe('growth');
+      expect(res.body.data.orderId).toBeDefined();
+    });
+
+    it('POST /api/subscription/verify verifies payment and upgrades subscription', async () => {
+      const orderRes = await request(app)
+        .post('/api/subscription/create-order')
+        .set('Authorization', `Bearer ${orgAToken}`)
+        .send({ plan: 'pro' });
+
+      const res = await request(app)
+        .post('/api/subscription/verify')
+        .set('Authorization', `Bearer ${orgAToken}`)
+        .send({
+          razorpay_order_id: orderRes.body.data.orderId,
+          razorpay_payment_id: 'pay_test_123',
+          razorpay_signature: 'sig_test_123',
+          plan: 'pro',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.plan).toBe('pro');
+      expect(res.body.data.status).toBe('active');
+    });
+
+    it('POST /api/subscription/payment-link creates payment link for checkout', async () => {
+      const res = await request(app)
+        .post('/api/subscription/payment-link')
+        .set('Authorization', `Bearer ${orgAToken}`)
+        .send({ plan: 'starter' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.amount).toBe(49900);
+      expect(res.body.data.plan).toBe('starter');
+    });
   });
 });

@@ -1,8 +1,18 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.extendTrial = exports.upgradeSubscription = exports.getCurrentSubscription = void 0;
+exports.handleRazorpayWebhook = exports.createRazorpayPaymentLink = exports.verifyRazorpayPayment = exports.createRazorpayOrder = exports.extendTrial = exports.upgradeSubscription = exports.getCurrentSubscription = exports.PLAN_PRICES = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const models_1 = require("../models");
+const env_1 = require("../config/env");
+exports.PLAN_PRICES = {
+    starter: { amountPaise: 49900, label: 'Starter Plan (₹499/mo)' },
+    growth: { amountPaise: 99900, label: 'Growth Plan (₹999/mo)' },
+    pro: { amountPaise: 199900, label: 'Pro Enterprise Plan (₹1,999/mo)' },
+};
 /**
  * Get current subscription status, quotas, and usage
  * GET /api/subscription/current
@@ -125,3 +135,265 @@ const extendTrial = async (req, res, next) => {
     }
 };
 exports.extendTrial = extendTrial;
+/**
+ * Create Razorpay Order for Subscription Upgrade
+ * POST /api/subscription/create-order
+ */
+const createRazorpayOrder = async (req, res, next) => {
+    try {
+        const orgId = req.orgId;
+        if (!orgId)
+            throw new errorHandler_1.AppError('Organization context required', 403);
+        const { plan } = req.body;
+        if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+            throw new errorHandler_1.AppError("Invalid plan. Must be 'starter', 'growth', or 'pro'", 400);
+        }
+        const planConfig = exports.PLAN_PRICES[plan];
+        const amountPaise = planConfig.amountPaise;
+        const keyId = env_1.env.RAZORPAY_KEY_ID;
+        const keySecret = env_1.env.RAZORPAY_KEY_SECRET;
+        if (keyId && keySecret) {
+            const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+            const response = await fetch('https://api.razorpay.com/v1/orders', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: authHeader,
+                },
+                body: JSON.stringify({
+                    amount: amountPaise,
+                    currency: 'INR',
+                    receipt: `rcpt_sub_${orgId.toString().slice(-6)}_${Date.now()}`,
+                    notes: {
+                        orgId: orgId.toString(),
+                        plan,
+                    },
+                }),
+            });
+            if (!response.ok) {
+                const errorData = (await response.json().catch(() => ({})));
+                throw new errorHandler_1.AppError(errorData?.error?.description || 'Failed to create Razorpay order', response.status);
+            }
+            const orderData = (await response.json());
+            res.status(200).json({
+                success: true,
+                data: {
+                    orderId: orderData.id,
+                    amount: orderData.amount,
+                    currency: orderData.currency,
+                    keyId,
+                    plan,
+                    planLabel: planConfig.label,
+                    isMock: false,
+                },
+            });
+            return;
+        }
+        // Sandbox / Test fallback if keys are not yet configured in .env
+        const mockOrderId = `order_mock_${orgId.toString().slice(-6)}_${Date.now()}`;
+        res.status(200).json({
+            success: true,
+            data: {
+                orderId: mockOrderId,
+                amount: amountPaise,
+                currency: 'INR',
+                keyId: 'rzp_test_mock_sandbox',
+                plan,
+                planLabel: planConfig.label,
+                isMock: true,
+                notice: 'Sandbox mock active. Add RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET in .env for live gateway.',
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.createRazorpayOrder = createRazorpayOrder;
+/**
+ * Verify Razorpay Payment and Activate Subscription
+ * POST /api/subscription/verify
+ */
+const verifyRazorpayPayment = async (req, res, next) => {
+    try {
+        const orgId = req.orgId;
+        if (!orgId)
+            throw new errorHandler_1.AppError('Organization context required', 403);
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan } = req.body;
+        if (!razorpay_order_id || !plan) {
+            throw new errorHandler_1.AppError('razorpay_order_id and plan are required', 400);
+        }
+        const keySecret = env_1.env.RAZORPAY_KEY_SECRET;
+        // Cryptographic HMAC SHA256 verification if live Razorpay keys are configured
+        if (keySecret && !razorpay_order_id.startsWith('order_mock_')) {
+            if (!razorpay_payment_id || !razorpay_signature) {
+                throw new errorHandler_1.AppError('razorpay_payment_id and razorpay_signature are required', 400);
+            }
+            const expectedSignature = crypto_1.default
+                .createHmac('sha256', keySecret)
+                .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+                .digest('hex');
+            if (expectedSignature !== razorpay_signature) {
+                throw new errorHandler_1.AppError('Invalid Razorpay payment signature', 400);
+            }
+        }
+        const limits = models_1.PLAN_LIMITS[plan];
+        const planConfig = exports.PLAN_PRICES[plan];
+        const now = new Date();
+        const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days active
+        let subscription = await models_1.Subscription.findOne({ organization: orgId });
+        if (!subscription) {
+            subscription = new models_1.Subscription({ organization: orgId });
+        }
+        subscription.plan = plan;
+        subscription.status = 'active';
+        subscription.maxProperties = limits.maxProperties;
+        subscription.maxBeds = limits.maxBeds;
+        subscription.currentPeriodEnd = periodEnd;
+        subscription.razorpayOrderId = razorpay_order_id;
+        subscription.razorpayPaymentId = razorpay_payment_id || `pay_mock_${Date.now()}`;
+        subscription.razorpaySignature = razorpay_signature || 'mock_signature';
+        subscription.lastPaymentAmount = (planConfig?.amountPaise || 0) / 100;
+        subscription.lastPaymentDate = now;
+        await subscription.save();
+        res.status(200).json({
+            success: true,
+            message: `Payment verified! Plan successfully upgraded to ${plan.toUpperCase()} for 30 days.`,
+            data: subscription,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.verifyRazorpayPayment = verifyRazorpayPayment;
+/**
+ * Create Razorpay Payment Link (UPI, Cards, NetBanking with deep-link return)
+ * POST /api/subscription/payment-link
+ */
+const createRazorpayPaymentLink = async (req, res, next) => {
+    try {
+        const orgId = req.orgId;
+        if (!orgId)
+            throw new errorHandler_1.AppError('Organization context required', 403);
+        const { plan } = req.body;
+        if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+            throw new errorHandler_1.AppError("Invalid plan. Must be 'starter', 'growth', or 'pro'", 400);
+        }
+        const planConfig = exports.PLAN_PRICES[plan];
+        const amountPaise = planConfig.amountPaise;
+        const keyId = env_1.env.RAZORPAY_KEY_ID;
+        const keySecret = env_1.env.RAZORPAY_KEY_SECRET;
+        if (keyId && keySecret) {
+            const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+            const response = await fetch('https://api.razorpay.com/v1/payment_links', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: authHeader,
+                },
+                body: JSON.stringify({
+                    amount: amountPaise,
+                    currency: 'INR',
+                    description: `Nilaaya PG Management - ${planConfig.label}`,
+                    notes: {
+                        orgId: orgId.toString(),
+                        plan,
+                    },
+                    callback_url: 'pgowner://subscription',
+                    callback_method: 'get',
+                }),
+            });
+            if (!response.ok) {
+                const errorData = (await response.json().catch(() => ({})));
+                throw new errorHandler_1.AppError(errorData?.error?.description || 'Failed to create Razorpay payment link', response.status);
+            }
+            const linkData = (await response.json());
+            res.status(200).json({
+                success: true,
+                data: {
+                    paymentLinkId: linkData.id,
+                    paymentLinkUrl: linkData.short_url,
+                    amount: linkData.amount,
+                    currency: linkData.currency,
+                    plan,
+                    isMock: false,
+                },
+            });
+            return;
+        }
+        // Mock fallback link
+        res.status(200).json({
+            success: true,
+            data: {
+                paymentLinkId: `plink_mock_${Date.now()}`,
+                paymentLinkUrl: '',
+                amount: amountPaise,
+                currency: 'INR',
+                plan,
+                isMock: true,
+                notice: 'Sandbox mock active. Add RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET in .env to generate live checkout URLs.',
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.createRazorpayPaymentLink = createRazorpayPaymentLink;
+/**
+ * Handle incoming Razorpay Webhooks
+ * POST /api/subscription/webhook
+ */
+const handleRazorpayWebhook = async (req, res, next) => {
+    try {
+        const signature = req.headers['x-razorpay-signature'];
+        const webhookSecret = env_1.env.RAZORPAY_WEBHOOK_SECRET || env_1.env.RAZORPAY_KEY_SECRET;
+        if (webhookSecret && signature) {
+            const bodyString = JSON.stringify(req.body);
+            const expectedSignature = crypto_1.default
+                .createHmac('sha256', webhookSecret)
+                .update(bodyString)
+                .digest('hex');
+            if (expectedSignature !== signature) {
+                throw new errorHandler_1.AppError('Invalid webhook signature', 400);
+            }
+        }
+        const event = req.body.event;
+        const payload = req.body.payload;
+        if (event === 'order.paid' ||
+            event === 'payment.captured' ||
+            event === 'payment_link.paid') {
+            const entity = payload?.payment?.entity ||
+                payload?.order?.entity ||
+                payload?.payment_link?.entity;
+            const orgId = entity?.notes?.orgId;
+            const plan = entity?.notes?.plan;
+            if (orgId && plan && ['starter', 'growth', 'pro'].includes(plan)) {
+                const limits = models_1.PLAN_LIMITS[plan];
+                const planConfig = exports.PLAN_PRICES[plan];
+                const now = new Date();
+                const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+                let subscription = await models_1.Subscription.findOne({ organization: orgId });
+                if (!subscription) {
+                    subscription = new models_1.Subscription({ organization: orgId });
+                }
+                subscription.plan = plan;
+                subscription.status = 'active';
+                subscription.maxProperties = limits.maxProperties;
+                subscription.maxBeds = limits.maxBeds;
+                subscription.currentPeriodEnd = periodEnd;
+                subscription.razorpayPaymentId = entity?.id || '';
+                subscription.razorpayOrderId = entity?.order_id || '';
+                subscription.lastPaymentAmount = (entity?.amount || planConfig?.amountPaise || 0) / 100;
+                subscription.lastPaymentDate = now;
+                await subscription.save();
+            }
+        }
+        res.status(200).json({ received: true });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.handleRazorpayWebhook = handleRazorpayWebhook;

@@ -11,6 +11,11 @@ export interface ISubscription extends Document {
   currentPeriodEnd: Date;
   maxProperties: number;
   maxBeds: number;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
+  lastPaymentAmount?: number;
+  lastPaymentDate?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,6 +66,25 @@ const SubscriptionSchema = new Schema<ISubscription>(
       type: Number,
       default: PLAN_LIMITS.starter.maxBeds,
       required: true,
+    },
+    razorpayOrderId: {
+      type: String,
+      default: '',
+    },
+    razorpayPaymentId: {
+      type: String,
+      default: '',
+    },
+    razorpaySignature: {
+      type: String,
+      default: '',
+    },
+    lastPaymentAmount: {
+      type: Number,
+      default: 0,
+    },
+    lastPaymentDate: {
+      type: Date,
     },
   },
   {
