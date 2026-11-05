@@ -222,4 +222,189 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
       expect(updatedSub?.razorpayPaymentId).toBe('pay_callback_999');
     });
   });
+
+  describe('Real-Time Subscription Lifecycle: Purchase Before & After Trial Expiry', () => {
+    let testOrgToken: string;
+    let testOrgId: string;
+
+    beforeEach(async () => {
+      // Create fresh organization for each test case
+      const testOrg = await Organization.create({
+        name: `Test PG ${Date.now()}`,
+        ownerName: 'Test PG Owner',
+        phone: '9888877777',
+        email: `owner_${Date.now()}@testpg.com`,
+      });
+      testOrgId = testOrg._id.toString();
+
+      const user = await User.create({
+        organization: testOrg._id,
+        name: 'Test PG Owner',
+        phone: '9888877777',
+        email: `owner_${Date.now()}@testpg.com`,
+        password: 'Password123!',
+        role: 'owner',
+      });
+
+      testOrgToken = generateToken({
+        userId: user._id.toString(),
+        email: user.email,
+        role: user.role,
+        orgId: testOrgId,
+      });
+    });
+
+    it('CASE 1: User purchases PRO plan BEFORE free trial expires -> preserves remaining trial days + adds 30 days of PRO tier', async () => {
+      const now = new Date();
+      // Setup trial with 10 days remaining
+      const tenDaysFromNow = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'starter',
+        status: 'trialing',
+        trialEndsAt: tenDaysFromNow,
+        currentPeriodEnd: tenDaysFromNow,
+        maxProperties: 1,
+        maxBeds: 30,
+      });
+
+      // User upgrades to Pro before trial expires
+      const res = await request(app)
+        .post('/api/subscription/upgrade')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({ plan: 'pro' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.plan).toBe('pro');
+      expect(res.body.data.status).toBe('active');
+      expect(res.body.data.maxProperties).toBe(999);
+      expect(res.body.data.maxBeds).toBe(9999);
+
+      // Period end should be now + remaining trial (10 days) + 30 days paid = ~40 days from now
+      const periodEnd = new Date(res.body.data.currentPeriodEnd);
+      const daysFromNow = Math.round((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      expect(daysFromNow).toBeGreaterThanOrEqual(39);
+      expect(daysFromNow).toBeLessThanOrEqual(41);
+
+      // Check current subscription API returns PRO plan and not trial
+      const currentRes = await request(app)
+        .get('/api/subscription/current')
+        .set('Authorization', `Bearer ${testOrgToken}`);
+
+      expect(currentRes.status).toBe(200);
+      expect(currentRes.body.data.plan).toBe('pro');
+      expect(currentRes.body.data.status).toBe('active');
+      expect(currentRes.body.data.isReadOnly).toBe(false);
+      expect(currentRes.body.data.daysLeft).toBeGreaterThanOrEqual(39);
+    });
+
+    it('CASE 2: User purchases PRO plan AFTER free trial expires -> unlocks read-only mode, activates 30 days of PRO tier', async () => {
+      const now = new Date();
+      // Setup expired trial (2 days ago)
+      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'starter',
+        status: 'expired',
+        trialEndsAt: twoDaysAgo,
+        currentPeriodEnd: twoDaysAgo,
+        maxProperties: 1,
+        maxBeds: 30,
+      });
+
+      // Verify currently in read-only mode
+      const preCheck = await request(app)
+        .get('/api/subscription/current')
+        .set('Authorization', `Bearer ${testOrgToken}`);
+      expect(preCheck.body.data.isReadOnly).toBe(true);
+
+      // User purchases Pro plan after expiry via verify endpoint
+      const res = await request(app)
+        .post('/api/subscription/verify')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({
+          razorpay_order_id: 'order_mock_after_expiry_123',
+          razorpay_payment_id: 'pay_mock_456',
+          razorpay_signature: 'test_signature_valid',
+          plan: 'pro',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.plan).toBe('pro');
+      expect(res.body.data.status).toBe('active');
+
+      // Period end should be exactly ~30 days from now
+      const periodEnd = new Date(res.body.data.currentPeriodEnd);
+      const daysFromNow = Math.round((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      expect(daysFromNow).toBeGreaterThanOrEqual(29);
+      expect(daysFromNow).toBeLessThanOrEqual(31);
+
+      // Check current subscription API confirms read-only is removed
+      const postCheck = await request(app)
+        .get('/api/subscription/current')
+        .set('Authorization', `Bearer ${testOrgToken}`);
+      expect(postCheck.body.data.isReadOnly).toBe(false);
+      expect(postCheck.body.data.plan).toBe('pro');
+      expect(postCheck.body.data.status).toBe('active');
+    });
+
+    it('CASE 3: User extends/renews PRO plan while ALREADY ACTIVE -> extends currentPeriodEnd by 30 days', async () => {
+      const now = new Date();
+      // Setup already active Pro plan with 15 days remaining
+      const fifteenDaysFromNow = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000);
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'pro',
+        status: 'active',
+        currentPeriodEnd: fifteenDaysFromNow,
+        maxProperties: 9999,
+        maxBeds: 99999,
+      });
+
+      // User extends subscription
+      const res = await request(app)
+        .post('/api/subscription/upgrade')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({ plan: 'pro' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.plan).toBe('pro');
+      expect(res.body.data.status).toBe('active');
+
+      // Period end should be fifteenDaysFromNow + 30 days = ~45 days from now
+      const periodEnd = new Date(res.body.data.currentPeriodEnd);
+      const daysFromNow = Math.round((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      expect(daysFromNow).toBeGreaterThanOrEqual(44);
+      expect(daysFromNow).toBeLessThanOrEqual(46);
+    });
+
+    it('CASE 4: User completes payment via Razorpay Payment Link (plink_...) -> verifies and activates PRO tier', async () => {
+      const now = new Date();
+      const fiveDaysFromNow = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'starter',
+        status: 'trialing',
+        trialEndsAt: fiveDaysFromNow,
+        currentPeriodEnd: fiveDaysFromNow,
+      });
+
+      const res = await request(app)
+        .post('/api/subscription/verify')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({
+          razorpay_order_id: 'plink_mock_test_7788',
+          razorpay_payment_id: 'pay_rzp_link_99',
+          razorpay_signature: 'verified_signature',
+          plan: 'pro',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.plan).toBe('pro');
+      expect(res.body.data.status).toBe('active');
+    });
+  });
 });
