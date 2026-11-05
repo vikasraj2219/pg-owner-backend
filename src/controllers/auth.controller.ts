@@ -228,6 +228,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
               currentPeriodEnd: subscription.currentPeriodEnd,
               maxProperties: subscription.maxProperties,
               maxBeds: subscription.maxBeds,
+              scheduledPlan: subscription.scheduledPlan || null,
+              scheduledPlanEffectiveAt: subscription.scheduledPlanEffectiveAt || null,
             }
           : null,
       },
@@ -285,6 +287,8 @@ export const getMe = async (
               currentPeriodEnd: subscription.currentPeriodEnd,
               maxProperties: subscription.maxProperties,
               maxBeds: subscription.maxBeds,
+              scheduledPlan: subscription.scheduledPlan || null,
+              scheduledPlanEffectiveAt: subscription.scheduledPlanEffectiveAt || null,
             }
           : null,
       },

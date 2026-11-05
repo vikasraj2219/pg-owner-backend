@@ -99,6 +99,15 @@ const SubscriptionSchema = new mongoose_1.Schema({
     lastPaymentDate: {
         type: Date,
     },
+    scheduledPlan: {
+        type: String,
+        enum: ['starter', 'growth', 'pro', null],
+        default: null,
+    },
+    scheduledPlanEffectiveAt: {
+        type: Date,
+        default: null,
+    },
 }, {
     timestamps: true,
 });

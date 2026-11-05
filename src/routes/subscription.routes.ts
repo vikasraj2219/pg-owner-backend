@@ -4,6 +4,8 @@ import { enforceOrgScope } from '../middleware/enforceOrgScope';
 import {
   getCurrentSubscription,
   upgradeSubscription,
+  scheduleDowngrade,
+  cancelDowngrade,
   extendTrial,
   createRazorpayOrder,
   verifyRazorpayPayment,
@@ -24,6 +26,8 @@ router.use(enforceOrgScope);
 
 router.get('/current', getCurrentSubscription);
 router.post('/upgrade', upgradeSubscription);
+router.post('/schedule-downgrade', scheduleDowngrade);
+router.post('/cancel-downgrade', cancelDowngrade);
 router.post('/extend-trial', extendTrial);
 
 // Razorpay Payment Gateway Endpoints

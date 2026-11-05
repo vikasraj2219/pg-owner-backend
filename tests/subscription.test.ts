@@ -406,5 +406,98 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
       expect(res.body.data.plan).toBe('pro');
       expect(res.body.data.status).toBe('active');
     });
+
+    it('CASE 5: Value-Based Proration: User on paid Starter (10 days left) upgrades to Growth -> converts unspent value into +5 bonus days (35 days total)', async () => {
+      const now = new Date();
+      // 10 days remaining on Starter (₹499)
+      const tenDaysFromNow = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'starter',
+        status: 'active',
+        currentPeriodEnd: tenDaysFromNow,
+        maxProperties: 1,
+        maxBeds: 30,
+      });
+
+      const res = await request(app)
+        .post('/api/subscription/upgrade')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({ plan: 'growth' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.plan).toBe('growth');
+      expect(res.body.data.status).toBe('active');
+      expect(res.body.data.maxProperties).toBe(3);
+      expect(res.body.data.maxBeds).toBe(100);
+
+      // 10 days of Starter (₹166.30) / Growth daily rate (₹33.30) = 5 bonus days
+      // Total days from now should be 30 + 5 = 35 days (NOT 40 days)
+      const periodEnd = new Date(res.body.data.currentPeriodEnd);
+      const daysFromNow = Math.round((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      expect(daysFromNow).toBe(35);
+    });
+
+    it('CASE 6: Downgrades: User on Pro schedules downgrade to Starter -> Pro access remains until currentPeriodEnd', async () => {
+      const now = new Date();
+      const twentyDaysFromNow = new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000);
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'pro',
+        status: 'active',
+        currentPeriodEnd: twentyDaysFromNow,
+        maxProperties: 999,
+        maxBeds: 9999,
+      });
+
+      const res = await request(app)
+        .post('/api/subscription/schedule-downgrade')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({ plan: 'starter' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.plan).toBe('pro'); // Still on Pro!
+      expect(res.body.data.scheduledPlan).toBe('starter'); // Scheduled for next cycle
+      expect(res.body.data.maxProperties).toBe(999); // Still has Pro quotas
+      expect(res.body.data.maxBeds).toBe(9999);
+    });
+
+    it('CASE 7: Resource Gating: Gated resource creation (Property quota) blocks exceeding limit', async () => {
+      // Setup Starter subscription (limit: 1 property)
+      await Subscription.create({
+        organization: testOrgId,
+        plan: 'starter',
+        status: 'active',
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        maxProperties: 1,
+        maxBeds: 30,
+      });
+
+      // 1st property creation succeeds
+      const prop1 = await request(app)
+        .post('/api/properties')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({
+          name: 'First Property',
+          type: 'coliving',
+          address: 'Koramangala, Bengaluru',
+          upiVpa: 'first@okaxis',
+        });
+      expect(prop1.status).toBe(201);
+
+      // 2nd property creation is BLOCKED with 403 Plan Limit
+      const prop2 = await request(app)
+        .post('/api/properties')
+        .set('Authorization', `Bearer ${testOrgToken}`)
+        .send({
+          name: 'Second Property',
+          type: 'coliving',
+          address: 'Indiranagar, Bengaluru',
+          upiVpa: 'second@okaxis',
+        });
+      expect(prop2.status).toBe(403);
+      expect(prop2.body.message).toContain('plan limit reached');
+    });
   });
 });

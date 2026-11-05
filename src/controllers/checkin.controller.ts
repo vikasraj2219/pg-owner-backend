@@ -8,6 +8,7 @@ import { BedAssignment } from '../models/BedAssignment';
 import { Invoice } from '../models/Invoice';
 import { DepositLedger } from '../models/DepositLedger';
 import { Organization } from '../models/Organization';
+import { Subscription } from '../models/Subscription';
 import { calculateProratedRent } from '../services/proration.service';
 import { generateInvoiceNumber } from '../services/invoiceNumber.service';
 import { AppError } from '../middleware/errorHandler';
@@ -75,7 +76,22 @@ export const quickCheckin = async (
       );
     }
 
-    // 3. Prepare Dates and Proration
+    // 3. Verify Subscription Capacity / Quota
+    const sub = await Subscription.findOne({ organization: orgId });
+    if (sub) {
+      const occupiedBedsCount = await Bed.countDocuments({
+        organization: orgId,
+        status: { $in: ['occupied', 'notice_period'] },
+      });
+      if (occupiedBedsCount >= sub.maxBeds) {
+        throw new AppError(
+          `Subscription limit reached: Your ${sub.plan} plan supports up to ${sub.maxBeds} active tenants. You currently have ${occupiedBedsCount} active tenants. Please upgrade to check in additional tenants.`,
+          403,
+        );
+      }
+    }
+
+    // 4. Prepare Dates and Proration
     const joinDateObj = new Date(input.joinDate);
     const proration = calculateProratedRent(input.monthlyRentPaise, joinDateObj);
     const monthName = MONTH_NAMES[proration.month - 1];

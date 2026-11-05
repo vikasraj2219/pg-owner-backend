@@ -200,6 +200,8 @@ const login = async (req, res, next) => {
                         currentPeriodEnd: subscription.currentPeriodEnd,
                         maxProperties: subscription.maxProperties,
                         maxBeds: subscription.maxBeds,
+                        scheduledPlan: subscription.scheduledPlan || null,
+                        scheduledPlanEffectiveAt: subscription.scheduledPlanEffectiveAt || null,
                     }
                     : null,
             },
@@ -251,6 +253,8 @@ const getMe = async (req, res, next) => {
                         currentPeriodEnd: subscription.currentPeriodEnd,
                         maxProperties: subscription.maxProperties,
                         maxBeds: subscription.maxBeds,
+                        scheduledPlan: subscription.scheduledPlan || null,
+                        scheduledPlanEffectiveAt: subscription.scheduledPlanEffectiveAt || null,
                     }
                     : null,
             },

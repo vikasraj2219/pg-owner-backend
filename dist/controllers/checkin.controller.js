@@ -13,6 +13,7 @@ const BedAssignment_1 = require("../models/BedAssignment");
 const Invoice_1 = require("../models/Invoice");
 const DepositLedger_1 = require("../models/DepositLedger");
 const Organization_1 = require("../models/Organization");
+const Subscription_1 = require("../models/Subscription");
 const proration_service_1 = require("../services/proration.service");
 const invoiceNumber_service_1 = require("../services/invoiceNumber.service");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -64,7 +65,18 @@ const quickCheckin = async (req, res, next) => {
         if (bed.status !== 'available') {
             throw new errorHandler_1.AppError(`Bed ${bed.bedNumber} is currently ${bed.status}. Only available beds can be checked into.`, 400);
         }
-        // 3. Prepare Dates and Proration
+        // 3. Verify Subscription Capacity / Quota
+        const sub = await Subscription_1.Subscription.findOne({ organization: orgId });
+        if (sub) {
+            const occupiedBedsCount = await Bed_1.Bed.countDocuments({
+                organization: orgId,
+                status: { $in: ['occupied', 'notice_period'] },
+            });
+            if (occupiedBedsCount >= sub.maxBeds) {
+                throw new errorHandler_1.AppError(`Subscription limit reached: Your ${sub.plan} plan supports up to ${sub.maxBeds} active tenants. You currently have ${occupiedBedsCount} active tenants. Please upgrade to check in additional tenants.`, 403);
+            }
+        }
+        // 4. Prepare Dates and Proration
         const joinDateObj = new Date(input.joinDate);
         const proration = (0, proration_service_1.calculateProratedRent)(input.monthlyRentPaise, joinDateObj);
         const monthName = MONTH_NAMES[proration.month - 1];

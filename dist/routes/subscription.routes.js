@@ -13,6 +13,8 @@ router.use(auth_1.protect);
 router.use(enforceOrgScope_1.enforceOrgScope);
 router.get('/current', subscription_controller_1.getCurrentSubscription);
 router.post('/upgrade', subscription_controller_1.upgradeSubscription);
+router.post('/schedule-downgrade', subscription_controller_1.scheduleDowngrade);
+router.post('/cancel-downgrade', subscription_controller_1.cancelDowngrade);
 router.post('/extend-trial', subscription_controller_1.extendTrial);
 // Razorpay Payment Gateway Endpoints
 router.post('/create-order', subscription_controller_1.createRazorpayOrder);

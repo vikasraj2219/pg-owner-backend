@@ -13,18 +13,27 @@ export const PLAN_PRICES: Record<PlanType, { amountPaise: number; label: string 
 
 /**
  * Calculates new period end date taking into account:
- * 1. Purchase BEFORE trial expires: preserves remaining trial days + adds 30 days
- * 2. Purchase AFTER trial expires: sets 30 days active starting from now
- * 3. Purchase while already active: extends from current period end + adds 30 days
+ * 1. Promotional Free Trial -> Upgrade: preserves 100% of remaining trial days + adds 30 days
+ * 2. Paid Plan -> Higher Tier Upgrade: Value-Based Proration!
+ *    Converts unspent rupee credit of current paid plan into bonus days at new tier rate
+ * 3. Same Plan Renewal: extends from current period end + 30 days
+ * 4. Purchase AFTER expiry or fresh: 30 days from now
  */
 export const calculateNewPeriodEnd = (
-  subscription: { status: string; trialEndsAt?: Date; currentPeriodEnd?: Date } | null,
+  subscription: {
+    plan?: PlanType;
+    status: string;
+    trialEndsAt?: Date;
+    currentPeriodEnd?: Date;
+  } | null,
+  targetPlan: PlanType = 'starter',
   now = new Date(),
-): Date => {
-  const DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days active access
+): { newPeriodEnd: Date; bonusDays: number } => {
+  const DURATION_DAYS = 30;
+  const DURATION_MS = DURATION_DAYS * 24 * 60 * 60 * 1000;
 
   if (!subscription) {
-    return new Date(now.getTime() + DURATION_MS);
+    return { newPeriodEnd: new Date(now.getTime() + DURATION_MS), bonusDays: 0 };
   }
 
   const isTrialing =
@@ -38,18 +47,52 @@ export const calculateNewPeriodEnd = (
     new Date(subscription.currentPeriodEnd) > now;
 
   if (isTrialing) {
-    // Subscribed BEFORE trial expired: preserve remaining trial days and add full 30 days
+    // Subscribed BEFORE trial expired: preserve remaining promotional trial days + 30 days
     const remainingTrialMs = new Date(subscription.trialEndsAt!).getTime() - now.getTime();
-    return new Date(now.getTime() + remainingTrialMs + DURATION_MS);
+    const bonusDays = Math.round(remainingTrialMs / (1000 * 60 * 60 * 24));
+    return {
+      newPeriodEnd: new Date(now.getTime() + remainingTrialMs + DURATION_MS),
+      bonusDays,
+    };
   }
 
-  if (isActivePaid) {
-    // Subscribed while already active: extend from current period end
-    return new Date(new Date(subscription.currentPeriodEnd!).getTime() + DURATION_MS);
+  if (isActivePaid && subscription.plan) {
+    const currentPricePaise = PLAN_PRICES[subscription.plan]?.amountPaise || 49900;
+    const targetPricePaise = PLAN_PRICES[targetPlan]?.amountPaise || currentPricePaise;
+
+    const remainingMs = new Date(subscription.currentPeriodEnd!).getTime() - now.getTime();
+    const remainingDays = Math.max(0, remainingMs / (1000 * 60 * 60 * 24));
+
+    if (subscription.plan === targetPlan) {
+      // Renewing the SAME tier: simply extend 30 days onto existing currentPeriodEnd
+      return {
+        newPeriodEnd: new Date(new Date(subscription.currentPeriodEnd!).getTime() + DURATION_MS),
+        bonusDays: 0,
+      };
+    } else if (targetPricePaise > currentPricePaise) {
+      // Upgrading to HIGHER tier: Value-Based Proration!
+      // Convert unused rupee value of current plan into equivalent bonus days on higher plan
+      const currentDailyPaise = currentPricePaise / 30;
+      const targetDailyPaise = targetPricePaise / 30;
+      const unspentCreditPaise = remainingDays * currentDailyPaise;
+      const bonusDays = Math.round(unspentCreditPaise / targetDailyPaise);
+      const bonusMs = bonusDays * 24 * 60 * 60 * 1000;
+
+      return {
+        newPeriodEnd: new Date(now.getTime() + DURATION_MS + bonusMs),
+        bonusDays,
+      };
+    } else {
+      // Direct switch to lower tier (if not scheduled)
+      return {
+        newPeriodEnd: new Date(now.getTime() + DURATION_MS),
+        bonusDays: 0,
+      };
+    }
   }
 
-  // Subscribed AFTER trial expired (read-only mode) or fresh: 30 days from now
-  return new Date(now.getTime() + DURATION_MS);
+  // Fresh purchase or purchase AFTER expiration: 30 days from now
+  return { newPeriodEnd: new Date(now.getTime() + DURATION_MS), bonusDays: 0 };
 };
 
 /**
@@ -76,6 +119,21 @@ export const getCurrentSubscription = async (
     }
 
     const now = new Date();
+
+    // Check if a scheduled downgrade has reached its effective date
+    if (
+      subscription.scheduledPlan &&
+      subscription.currentPeriodEnd &&
+      new Date(subscription.currentPeriodEnd) <= now
+    ) {
+      subscription.plan = subscription.scheduledPlan;
+      subscription.maxProperties = PLAN_LIMITS[subscription.scheduledPlan].maxProperties;
+      subscription.maxBeds = PLAN_LIMITS[subscription.scheduledPlan].maxBeds;
+      subscription.scheduledPlan = null;
+      subscription.scheduledPlanEffectiveAt = null;
+      await subscription.save();
+    }
+
     const isTrialExpired =
       subscription.status === 'trialing' && new Date(subscription.trialEndsAt) < now;
     const isSubscriptionExpired =
@@ -113,6 +171,8 @@ export const getCurrentSubscription = async (
         daysLeft,
         trialEndsAt: subscription.trialEndsAt,
         currentPeriodEnd: subscription.currentPeriodEnd,
+        scheduledPlan: subscription.scheduledPlan || null,
+        scheduledPlanEffectiveAt: subscription.scheduledPlanEffectiveAt || null,
         maxProperties: subscription.maxProperties,
         maxBeds: subscription.maxBeds,
         propertiesUsed,
@@ -151,18 +211,111 @@ export const upgradeSubscription = async (
       subscription = new Subscription({ organization: orgId });
     }
 
-    const periodEnd = calculateNewPeriodEnd(subscription, now);
+    const { newPeriodEnd: periodEnd, bonusDays } = calculateNewPeriodEnd(
+      subscription,
+      plan as PlanType,
+      now,
+    );
 
     subscription.plan = plan as PlanType;
     subscription.status = 'active';
     subscription.maxProperties = limits.maxProperties;
     subscription.maxBeds = limits.maxBeds;
     subscription.currentPeriodEnd = periodEnd;
+    subscription.scheduledPlan = null;
+    subscription.scheduledPlanEffectiveAt = null;
+    await subscription.save();
+
+    const bonusMsg = bonusDays > 0 ? ` (includes +${bonusDays} days prorated credit)` : '';
+    res.status(200).json({
+      success: true,
+      message: `Subscription successfully upgraded to ${plan.toUpperCase()} plan${bonusMsg}. Active until ${periodEnd.toDateString()}.`,
+      data: subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Schedule plan downgrade to take effect at the end of current billing period
+ * POST /api/subscription/schedule-downgrade
+ */
+export const scheduleDowngrade = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const orgId = req.orgId;
+    if (!orgId) throw new AppError('Organization context required', 403);
+
+    const { plan } = req.body;
+    if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+      throw new AppError("Invalid plan. Must be 'starter', 'growth', or 'pro'", 400);
+    }
+
+    const subscription = await Subscription.findOne({ organization: orgId });
+    if (!subscription) {
+      throw new AppError('Subscription not found', 404);
+    }
+
+    const now = new Date();
+    const tierRanks: Record<PlanType, number> = { starter: 1, growth: 2, pro: 3 };
+    const currentRank = tierRanks[subscription.plan] || 1;
+    const targetRank = tierRanks[plan as PlanType] || 1;
+
+    if (targetRank >= currentRank) {
+      throw new AppError(
+        `Cannot downgrade to ${plan.toUpperCase()}: it is not a lower tier than current ${subscription.plan.toUpperCase()} tier`,
+        400,
+      );
+    }
+
+    const effectiveDate =
+      subscription.currentPeriodEnd && new Date(subscription.currentPeriodEnd) > now
+        ? subscription.currentPeriodEnd
+        : now;
+
+    subscription.scheduledPlan = plan as PlanType;
+    subscription.scheduledPlanEffectiveAt = effectiveDate;
     await subscription.save();
 
     res.status(200).json({
       success: true,
-      message: `Subscription successfully upgraded to ${plan.toUpperCase()} plan. Active until ${periodEnd.toDateString()}.`,
+      message: `Plan downgrade to ${plan.toUpperCase()} scheduled for ${effectiveDate.toDateString()}. You retain full ${subscription.plan.toUpperCase()} access and quotas until then.`,
+      data: subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cancel a scheduled plan downgrade
+ * POST /api/subscription/cancel-downgrade
+ */
+export const cancelDowngrade = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const orgId = req.orgId;
+    if (!orgId) throw new AppError('Organization context required', 403);
+
+    const subscription = await Subscription.findOne({ organization: orgId });
+    if (!subscription) {
+      throw new AppError('Subscription not found', 404);
+    }
+
+    subscription.scheduledPlan = null;
+    subscription.scheduledPlanEffectiveAt = null;
+    await subscription.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Scheduled downgrade has been cancelled. You remain on the ${subscription.plan.toUpperCase()} plan.`,
       data: subscription,
     });
   } catch (error) {
@@ -375,13 +528,19 @@ export const verifyRazorpayPayment = async (
       subscription = new Subscription({ organization: orgId });
     }
 
-    const periodEnd = calculateNewPeriodEnd(subscription, now);
+    const { newPeriodEnd: periodEnd, bonusDays } = calculateNewPeriodEnd(
+      subscription,
+      plan as PlanType,
+      now,
+    );
 
     subscription.plan = plan as PlanType;
     subscription.status = 'active';
     subscription.maxProperties = limits.maxProperties;
     subscription.maxBeds = limits.maxBeds;
     subscription.currentPeriodEnd = periodEnd;
+    subscription.scheduledPlan = null;
+    subscription.scheduledPlanEffectiveAt = null;
     subscription.razorpayOrderId = razorpay_order_id;
     subscription.razorpayPaymentId = razorpay_payment_id || `pay_mock_${Date.now()}`;
     subscription.razorpaySignature = razorpay_signature || 'mock_signature';
@@ -389,9 +548,10 @@ export const verifyRazorpayPayment = async (
     subscription.lastPaymentDate = now;
     await subscription.save();
 
+    const bonusMsg = bonusDays > 0 ? ` (includes +${bonusDays} days prorated credit)` : '';
     res.status(200).json({
       success: true,
-      message: `Payment verified! Plan successfully upgraded to ${plan.toUpperCase()} until ${periodEnd.toDateString()}.`,
+      message: `Payment verified! Plan successfully upgraded to ${plan.toUpperCase()}${bonusMsg} until ${periodEnd.toDateString()}.`,
       data: subscription,
     });
   } catch (error) {
@@ -529,13 +689,19 @@ export const handleRazorpayWebhook = async (
           subscription = new Subscription({ organization: orgId });
         }
 
-        const periodEnd = calculateNewPeriodEnd(subscription, now);
+        const { newPeriodEnd: periodEnd } = calculateNewPeriodEnd(
+          subscription,
+          plan as PlanType,
+          now,
+        );
 
         subscription.plan = plan as PlanType;
         subscription.status = 'active';
         subscription.maxProperties = limits.maxProperties;
         subscription.maxBeds = limits.maxBeds;
         subscription.currentPeriodEnd = periodEnd;
+        subscription.scheduledPlan = null;
+        subscription.scheduledPlanEffectiveAt = null;
         subscription.razorpayPaymentId = entity?.id || '';
         subscription.razorpayOrderId = entity?.order_id || '';
         subscription.lastPaymentAmount = (entity?.amount || planConfig?.amountPaise || 0) / 100;
@@ -604,13 +770,19 @@ export const handlePaymentLinkCallback = async (
         subscription = new Subscription({ organization: orgId });
       }
 
-      const periodEnd = calculateNewPeriodEnd(subscription, now);
+      const { newPeriodEnd: periodEnd } = calculateNewPeriodEnd(
+        subscription,
+        plan as PlanType,
+        now,
+      );
 
       subscription.plan = plan as PlanType;
       subscription.status = 'active';
       subscription.maxProperties = limits.maxProperties;
       subscription.maxBeds = limits.maxBeds;
       subscription.currentPeriodEnd = periodEnd;
+      subscription.scheduledPlan = null;
+      subscription.scheduledPlanEffectiveAt = null;
       if (paymentId) subscription.razorpayPaymentId = paymentId;
       if (paymentLinkId) subscription.razorpayOrderId = paymentLinkId;
       subscription.lastPaymentAmount = (planConfig?.amountPaise || 0) / 100;

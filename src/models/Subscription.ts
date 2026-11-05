@@ -16,6 +16,8 @@ export interface ISubscription extends Document {
   razorpaySignature?: string;
   lastPaymentAmount?: number;
   lastPaymentDate?: Date;
+  scheduledPlan?: PlanType | null;
+  scheduledPlanEffectiveAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +87,15 @@ const SubscriptionSchema = new Schema<ISubscription>(
     },
     lastPaymentDate: {
       type: Date,
+    },
+    scheduledPlan: {
+      type: String,
+      enum: ['starter', 'growth', 'pro', null],
+      default: null,
+    },
+    scheduledPlanEffectiveAt: {
+      type: Date,
+      default: null,
     },
   },
   {
