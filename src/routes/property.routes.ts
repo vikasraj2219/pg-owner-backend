@@ -8,6 +8,8 @@ import {
   createRoom,
   getPropertyRooms,
   updateRoom,
+  deleteRoom,
+  addBedToRoom,
   getPropertyMatrix,
 } from '../controllers/property.controller';
 import { protect, requireRole } from '../middleware/auth';
@@ -35,5 +37,7 @@ router.get('/:id/matrix', getPropertyMatrix);
 router.route('/:id/rooms').post(createRoom).get(getPropertyRooms);
 
 router.put('/:id/rooms/:roomId', updateRoom);
+router.delete('/:id/rooms/:roomId', deleteRoom);
+router.post('/:id/rooms/:roomId/beds', addBedToRoom);
 
 export default router;

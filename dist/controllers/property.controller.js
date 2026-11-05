@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPropertyMatrix = exports.updateRoom = exports.getPropertyRooms = exports.createRoom = exports.deleteProperty = exports.updateProperty = exports.getPropertyById = exports.getProperties = exports.createProperty = exports.getBedSuffix = void 0;
+exports.getPropertyMatrix = exports.addBedToRoom = exports.deleteRoom = exports.updateRoom = exports.getPropertyRooms = exports.createRoom = exports.deleteProperty = exports.updateProperty = exports.getPropertyById = exports.getProperties = exports.createProperty = exports.getBedSuffix = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const property_validator_1 = require("../validators/property.validator");
 const Property_1 = require("../models/Property");
@@ -387,7 +387,89 @@ const updateRoom = async (req, res, next) => {
         if (!room) {
             throw new errorHandler_1.AppError('Room not found or does not belong to your organization', 404);
         }
-        Object.assign(room, input);
+        // 1. Update room number if provided and different
+        if (input.roomNumber && input.roomNumber.trim().toLowerCase() !== room.roomNumber.toLowerCase()) {
+            const duplicate = await Room_1.Room.findOne({
+                _id: { $ne: room._id },
+                property: room.property,
+                organization: orgId,
+                roomNumber: { $regex: new RegExp(`^${input.roomNumber.trim()}$`, 'i') },
+            });
+            if (duplicate) {
+                throw new errorHandler_1.AppError(`Room "${input.roomNumber}" already exists in this property`, 409);
+            }
+            const oldPrefix = room.roomNumber;
+            const newPrefix = input.roomNumber.trim();
+            // Update associated bed labels prefix
+            const existingBeds = await Bed_1.Bed.find({ room: room._id });
+            for (const bed of existingBeds) {
+                if (bed.bedNumber.startsWith(oldPrefix)) {
+                    bed.bedNumber = bed.bedNumber.replace(oldPrefix, newPrefix);
+                    await bed.save();
+                }
+            }
+            room.roomNumber = newPrefix;
+        }
+        // 2. Update floor number if provided
+        if (input.floorNumber !== undefined) {
+            room.floorNumber = input.floorNumber;
+        }
+        // 3. Update rent if provided
+        if (input.baseRentPaisePerBed !== undefined) {
+            room.baseRentPaisePerBed = input.baseRentPaisePerBed;
+        }
+        // 4. Update tags if provided
+        if (input.tags !== undefined) {
+            room.tags = input.tags;
+        }
+        // 5. Update sharing capacity if provided
+        if (input.sharingType !== undefined && input.sharingType !== room.sharingType) {
+            if (input.sharingType > room.sharingType) {
+                const additionalBeds = input.sharingType - room.sharingType;
+                // Check subscription quota
+                const sub = await Subscription_1.Subscription.findOne({ organization: orgId });
+                if (sub) {
+                    const currentBedCount = await Bed_1.Bed.countDocuments({ organization: orgId });
+                    if (currentBedCount + additionalBeds > sub.maxBeds) {
+                        throw new errorHandler_1.AppError(`Subscription limit reached: Adding ${additionalBeds} bed(s) would exceed your ${sub.plan.toUpperCase()} plan quota of ${sub.maxBeds} beds. You currently have ${currentBedCount} beds. Please upgrade.`, 403, 'PLAN_LIMIT_REACHED');
+                    }
+                }
+                // Generate additional beds
+                const existingBeds = await Bed_1.Bed.find({ room: room._id });
+                const existingNumbers = new Set(existingBeds.map(b => b.bedNumber.trim()));
+                const newBeds = [];
+                let suffixIdx = existingBeds.length;
+                while (newBeds.length < additionalBeds) {
+                    const suffix = (0, exports.getBedSuffix)(suffixIdx);
+                    const candidateNumber = `${room.roomNumber}-${suffix}`;
+                    if (!existingNumbers.has(candidateNumber)) {
+                        newBeds.push({
+                            organization: orgId,
+                            property: room.property,
+                            room: room._id,
+                            bedNumber: candidateNumber,
+                            status: 'available',
+                        });
+                        existingNumbers.add(candidateNumber);
+                    }
+                    suffixIdx++;
+                }
+                await Bed_1.Bed.insertMany(newBeds);
+                room.sharingType = input.sharingType;
+            }
+            else if (input.sharingType < room.sharingType) {
+                const bedsToRemoveCount = room.sharingType - input.sharingType;
+                // Find vacant beds that can be safely removed
+                const roomBeds = await Bed_1.Bed.find({ room: room._id }).sort({ createdAt: -1 });
+                const vacantBeds = roomBeds.filter(b => b.status === 'available' || b.status === 'maintenance');
+                if (vacantBeds.length < bedsToRemoveCount) {
+                    throw new errorHandler_1.AppError(`Cannot reduce sharing capacity to ${input.sharingType} bed(s). Only vacant beds can be removed, and there are not enough vacant beds in Room ${room.roomNumber}.`, 400);
+                }
+                const bedIdsToDelete = vacantBeds.slice(0, bedsToRemoveCount).map(b => b._id);
+                await Bed_1.Bed.deleteMany({ _id: { $in: bedIdsToDelete } });
+                room.sharingType = input.sharingType;
+            }
+        }
         await room.save();
         res.status(200).json({
             success: true,
@@ -400,6 +482,104 @@ const updateRoom = async (req, res, next) => {
     }
 };
 exports.updateRoom = updateRoom;
+const deleteRoom = async (req, res, next) => {
+    try {
+        const { roomId } = req.params;
+        const orgId = req.orgId;
+        if (!roomId || !mongoose_1.default.Types.ObjectId.isValid(roomId)) {
+            throw new errorHandler_1.AppError('Invalid room ID format', 400);
+        }
+        const room = await Room_1.Room.findOne({ _id: roomId, organization: orgId });
+        if (!room) {
+            throw new errorHandler_1.AppError('Room not found or does not belong to your organization', 404);
+        }
+        // Safety Check: Check if any bed in this room is occupied or in notice period
+        const occupiedOrNoticeBeds = await Bed_1.Bed.countDocuments({
+            room: room._id,
+            $or: [
+                { status: 'occupied' },
+                { status: 'notice_period' },
+                { currentTenant: { $exists: true, $ne: null } },
+            ],
+        });
+        if (occupiedOrNoticeBeds > 0) {
+            throw new errorHandler_1.AppError(`Cannot delete Room ${room.roomNumber} because it contains ${occupiedOrNoticeBeds} occupied or notice-period bed(s). Please vacate or relocate tenants first.`, 400);
+        }
+        // Safe to delete beds and room
+        await Bed_1.Bed.deleteMany({ room: room._id });
+        await Room_1.Room.deleteOne({ _id: room._id });
+        res.status(200).json({
+            success: true,
+            message: `Room ${room.roomNumber} and its beds have been deleted successfully`,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.deleteRoom = deleteRoom;
+const addBedToRoom = async (req, res, next) => {
+    try {
+        const { roomId } = req.params;
+        const orgId = req.orgId;
+        if (!roomId || !mongoose_1.default.Types.ObjectId.isValid(roomId)) {
+            throw new errorHandler_1.AppError('Invalid room ID format', 400);
+        }
+        const room = await Room_1.Room.findOne({ _id: roomId, organization: orgId });
+        if (!room) {
+            throw new errorHandler_1.AppError('Room not found or does not belong to your organization', 404);
+        }
+        // Check subscription quota
+        const sub = await Subscription_1.Subscription.findOne({ organization: orgId });
+        if (sub) {
+            const currentBedCount = await Bed_1.Bed.countDocuments({ organization: orgId });
+            if (currentBedCount >= sub.maxBeds) {
+                throw new errorHandler_1.AppError(`Subscription limit reached: You have reached your ${sub.plan.toUpperCase()} plan quota of ${sub.maxBeds} beds. Please upgrade your subscription to add more beds.`, 403, 'PLAN_LIMIT_REACHED');
+            }
+        }
+        const input = property_validator_1.addBedSchema.parse(req.body);
+        // Determine next bed number if not provided
+        let bedNumber = input.bedNumber?.trim();
+        if (!bedNumber) {
+            const existingBeds = await Bed_1.Bed.find({ room: room._id });
+            const existingBedNumbers = new Set(existingBeds.map(b => b.bedNumber.trim()));
+            let idx = existingBeds.length;
+            while (!bedNumber || existingBedNumbers.has(bedNumber)) {
+                bedNumber = `${room.roomNumber}-${(0, exports.getBedSuffix)(idx)}`;
+                idx++;
+            }
+        }
+        else {
+            const duplicate = await Bed_1.Bed.findOne({
+                room: room._id,
+                bedNumber: { $regex: new RegExp(`^${bedNumber}$`, 'i') },
+            });
+            if (duplicate) {
+                throw new errorHandler_1.AppError(`Bed "${bedNumber}" already exists in Room ${room.roomNumber}`, 409);
+            }
+        }
+        const newBed = await Bed_1.Bed.create({
+            organization: orgId,
+            property: room.property,
+            room: room._id,
+            bedNumber,
+            status: 'available',
+        });
+        // Update room sharing type count
+        const totalBedsInRoom = await Bed_1.Bed.countDocuments({ room: room._id });
+        room.sharingType = totalBedsInRoom;
+        await room.save();
+        res.status(201).json({
+            success: true,
+            message: `Bed ${bedNumber} added successfully to Room ${room.roomNumber}`,
+            data: newBed,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.addBedToRoom = addBedToRoom;
 // ==========================================
 // VISUAL BED MATRIX CONTROLLER
 // ==========================================

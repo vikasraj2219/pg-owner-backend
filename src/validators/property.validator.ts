@@ -61,12 +61,29 @@ export const createRoomSchema = z.object({
 });
 
 export const updateRoomSchema = z.object({
+  roomNumber: z
+    .string()
+    .trim()
+    .min(1, 'Room number cannot be empty')
+    .max(20, 'Room number cannot exceed 20 characters')
+    .optional(),
+  floorNumber: z.number().int('Floor number must be an integer').optional(),
+  sharingType: z
+    .number()
+    .int('Sharing type must be a whole integer')
+    .min(1, 'Sharing type must be at least 1')
+    .max(20, 'Sharing type cannot exceed 20 beds')
+    .optional(),
   baseRentPaisePerBed: z
     .number()
     .int('Base rent must be specified in integer paise')
     .nonnegative()
     .optional(),
   tags: z.array(z.string().trim()).optional(),
+});
+
+export const addBedSchema = z.object({
+  bedNumber: z.string().trim().min(1).max(20).optional(),
 });
 
 export const updateBedStatusSchema = z.object({

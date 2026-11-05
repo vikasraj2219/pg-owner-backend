@@ -20,4 +20,6 @@ router.get('/:id/matrix', property_controller_1.getPropertyMatrix);
 // Rooms and Bed Generation
 router.route('/:id/rooms').post(property_controller_1.createRoom).get(property_controller_1.getPropertyRooms);
 router.put('/:id/rooms/:roomId', property_controller_1.updateRoom);
+router.delete('/:id/rooms/:roomId', property_controller_1.deleteRoom);
+router.post('/:id/rooms/:roomId/beds', property_controller_1.addBedToRoom);
 exports.default = router;

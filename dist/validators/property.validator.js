@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateBedStatusSchema = exports.updateRoomSchema = exports.createRoomSchema = exports.updatePropertySchema = exports.createPropertySchema = void 0;
+exports.updateBedStatusSchema = exports.addBedSchema = exports.updateRoomSchema = exports.createRoomSchema = exports.updatePropertySchema = exports.createPropertySchema = void 0;
 const zod_1 = require("zod");
 exports.createPropertySchema = zod_1.z.object({
     name: zod_1.z
@@ -60,12 +60,28 @@ exports.createRoomSchema = zod_1.z.object({
     tags: zod_1.z.array(zod_1.z.string().trim()).optional().default([]),
 });
 exports.updateRoomSchema = zod_1.z.object({
+    roomNumber: zod_1.z
+        .string()
+        .trim()
+        .min(1, 'Room number cannot be empty')
+        .max(20, 'Room number cannot exceed 20 characters')
+        .optional(),
+    floorNumber: zod_1.z.number().int('Floor number must be an integer').optional(),
+    sharingType: zod_1.z
+        .number()
+        .int('Sharing type must be a whole integer')
+        .min(1, 'Sharing type must be at least 1')
+        .max(20, 'Sharing type cannot exceed 20 beds')
+        .optional(),
     baseRentPaisePerBed: zod_1.z
         .number()
         .int('Base rent must be specified in integer paise')
         .nonnegative()
         .optional(),
     tags: zod_1.z.array(zod_1.z.string().trim()).optional(),
+});
+exports.addBedSchema = zod_1.z.object({
+    bedNumber: zod_1.z.string().trim().min(1).max(20).optional(),
 });
 exports.updateBedStatusSchema = zod_1.z.object({
     status: zod_1.z.enum(['available', 'occupied', 'notice_period', 'maintenance'], {

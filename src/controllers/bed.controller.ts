@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { updateBedStatusSchema } from '../validators/property.validator';
 import { Bed } from '../models/Bed';
+import { Room } from '../models/Room';
 import '../models/Tenant';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
@@ -84,6 +85,48 @@ export const updateBedStatus = async (
       success: true,
       message: `Bed ${bed.bedNumber} status updated to ${bed.status}`,
       data: bed,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteBed = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid bed ID format', 400);
+    }
+
+    const bed = await Bed.findOne({ _id: id, organization: orgId });
+    if (!bed) {
+      throw new AppError('Bed not found or does not belong to your organization', 404);
+    }
+
+    if (bed.status === 'occupied' || bed.status === 'notice_period' || bed.currentTenant) {
+      throw new AppError(
+        `Cannot delete Bed ${bed.bedNumber} because it is currently occupied or on notice. Please check out or relocate the tenant first.`,
+        400,
+      );
+    }
+
+    const roomId = bed.room;
+    await Bed.deleteOne({ _id: bed._id });
+
+    if (roomId) {
+      const remainingBeds = await Bed.countDocuments({ room: roomId });
+      await Room.findByIdAndUpdate(roomId, { sharingType: Math.max(1, remainingBeds) });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Bed ${bed.bedNumber} deleted successfully`,
     });
   } catch (error) {
     next(error);
