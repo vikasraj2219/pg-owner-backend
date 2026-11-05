@@ -10,12 +10,25 @@ const cloudinary_1 = require("../config/cloudinary");
  */
 const uploadKycDocument = async (req, res, next) => {
     try {
-        if (!req.file) {
-            throw new errorHandler_1.AppError('No file uploaded. Please attach a file (JPEG, PNG, WEBP, or PDF).', 400);
+        let fileBuffer = null;
+        let originalName = 'kyc_document.jpg';
+        if (req.file) {
+            fileBuffer = req.file.buffer;
+            originalName = req.file.originalname || originalName;
+        }
+        else if (req.body?.file || req.body?.base64 || req.body?.image) {
+            const rawData = req.body.file || req.body.base64 || req.body.image;
+            originalName = req.body.originalName || req.body.fileName || originalName;
+            // Strip any Data URI header (e.g. data:image/jpeg;base64,)
+            const base64Clean = rawData.replace(/^data:[^;]+;base64,/, '').trim();
+            fileBuffer = Buffer.from(base64Clean, 'base64');
+        }
+        if (!fileBuffer || fileBuffer.length === 0) {
+            throw new errorHandler_1.AppError('No file uploaded. Please attach a file or base64 image data.', 400);
         }
         const orgId = req.orgId ? req.orgId.toString() : 'general';
         const folder = `pg-owner/${orgId}/kyc`;
-        const result = await (0, cloudinary_service_1.uploadBufferToCloudinary)(req.file.buffer, folder, req.file.originalname);
+        const result = await (0, cloudinary_service_1.uploadBufferToCloudinary)(fileBuffer, folder, originalName);
         res.status(201).json({
             success: true,
             message: 'KYC document uploaded successfully to Cloudinary',
@@ -28,7 +41,7 @@ const uploadKycDocument = async (req, res, next) => {
                 width: result.width,
                 height: result.height,
                 resourceType: result.resourceType,
-                originalName: req.file.originalname,
+                originalName,
             },
         });
     }

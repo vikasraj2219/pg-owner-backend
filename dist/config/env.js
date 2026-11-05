@@ -24,11 +24,11 @@ const envSchema = zod_1.z.object({
     JWT_EXPIRES_IN: zod_1.z.string().default('30d'),
     CLIENT_URL: zod_1.z.string().default('*'),
     INTERNAL_CRON_SECRET: zod_1.z.string().min(8, 'INTERNAL_CRON_SECRET is required'),
-    CLOUDINARY_CLOUD_NAME: zod_1.z.string().optional().default(''),
-    CLOUDINARY_API_KEY: zod_1.z.string().optional().default(''),
-    CLOUDINARY_API_SECRET: zod_1.z.string().optional().default(''),
-    RAZORPAY_KEY_ID: zod_1.z.string().optional().default(''),
-    RAZORPAY_KEY_SECRET: zod_1.z.string().optional().default(''),
+    CLOUDINARY_CLOUD_NAME: zod_1.z.string().optional().default('dfhvqof2'),
+    CLOUDINARY_API_KEY: zod_1.z.string().optional().default('151557572339636'),
+    CLOUDINARY_API_SECRET: zod_1.z.string().optional().default('nIQB56H67YQKP1xMXBRSc4alGpQ'),
+    RAZORPAY_KEY_ID: zod_1.z.string().optional().default('rzp_test_Tw3LXfbSgMW3Np'),
+    RAZORPAY_KEY_SECRET: zod_1.z.string().optional().default('YuO4zCPfnhfbXrj9Lx3HpaKT'),
     RAZORPAY_WEBHOOK_SECRET: zod_1.z.string().optional().default(''),
 });
 const parseEnv = () => {

@@ -14,14 +14,28 @@ export const uploadKycDocument = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    if (!req.file) {
-      throw new AppError('No file uploaded. Please attach a file (JPEG, PNG, WEBP, or PDF).', 400);
+    let fileBuffer: Buffer | null = null;
+    let originalName = 'kyc_document.jpg';
+
+    if (req.file) {
+      fileBuffer = req.file.buffer;
+      originalName = req.file.originalname || originalName;
+    } else if (req.body?.file || req.body?.base64 || req.body?.image) {
+      const rawData: string = req.body.file || req.body.base64 || req.body.image;
+      originalName = req.body.originalName || req.body.fileName || originalName;
+      // Strip any Data URI header (e.g. data:image/jpeg;base64,)
+      const base64Clean = rawData.replace(/^data:[^;]+;base64,/, '').trim();
+      fileBuffer = Buffer.from(base64Clean, 'base64');
+    }
+
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new AppError('No file uploaded. Please attach a file or base64 image data.', 400);
     }
 
     const orgId = req.orgId ? req.orgId.toString() : 'general';
     const folder = `pg-owner/${orgId}/kyc`;
 
-    const result = await uploadBufferToCloudinary(req.file.buffer, folder, req.file.originalname);
+    const result = await uploadBufferToCloudinary(fileBuffer, folder, originalName);
 
     res.status(201).json({
       success: true,
@@ -35,7 +49,7 @@ export const uploadKycDocument = async (
         width: result.width,
         height: result.height,
         resourceType: result.resourceType,
-        originalName: req.file.originalname,
+        originalName,
       },
     });
   } catch (err) {

@@ -35,6 +35,10 @@ const multerInstance = (0, multer_1.default)({
  * Flexible middleware that accepts a single file upload from any field name ('file', 'idProof', 'document', 'kycPhoto', etc.)
  */
 const uploadSingleDocument = (req, res, next) => {
+    // If request is JSON, skip multer and let json parser handle req.body
+    if (!req.is('multipart/form-data')) {
+        return next();
+    }
     multerInstance.any()(req, res, (err) => {
         if (err instanceof multer_1.default.MulterError) {
             if (err.code === 'LIMIT_FILE_SIZE') {
