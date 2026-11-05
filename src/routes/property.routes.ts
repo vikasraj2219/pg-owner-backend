@@ -9,6 +9,9 @@ import {
   getPropertyRooms,
   updateRoom,
   deleteRoom,
+  createFloor,
+  updateFloor,
+  deleteFloor,
   addBedToRoom,
   getPropertyMatrix,
 } from '../controllers/property.controller';
@@ -32,6 +35,11 @@ router
 
 // Visual Bed Matrix endpoint
 router.get('/:id/matrix', getPropertyMatrix);
+
+// Floor CRUD
+router.post('/:id/floors', createFloor);
+router.put('/:id/floors/:floorNumber', updateFloor);
+router.delete('/:id/floors/:floorNumber', deleteFloor);
 
 // Rooms and Bed Generation
 router.route('/:id/rooms').post(createRoom).get(getPropertyRooms);

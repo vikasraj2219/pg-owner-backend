@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
-import { updateBedStatusSchema } from '../validators/property.validator';
+import { updateBedStatusSchema, updateBedSchema } from '../validators/property.validator';
 import { Bed } from '../models/Bed';
 import { Room } from '../models/Room';
 import '../models/Tenant';
@@ -84,6 +84,72 @@ export const updateBedStatus = async (
     res.status(200).json({
       success: true,
       message: `Bed ${bed.bedNumber} status updated to ${bed.status}`,
+      data: bed,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateBed = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid bed ID format', 400);
+    }
+
+    const input = updateBedSchema.parse(req.body);
+
+    const bed = await Bed.findOne({ _id: id, organization: orgId });
+    if (!bed) {
+      throw new AppError('Bed not found or does not belong to your organization', 404);
+    }
+
+    // Check duplicate bedNumber if updating
+    if (input.bedNumber && input.bedNumber.trim() !== bed.bedNumber) {
+      const duplicate = await Bed.findOne({
+        _id: { $ne: bed._id },
+        room: bed.room,
+        bedNumber: { $regex: new RegExp(`^${input.bedNumber.trim()}$`, 'i') },
+      });
+      if (duplicate) {
+        throw new AppError(`Bed label "${input.bedNumber}" already exists in this room`, 409);
+      }
+      bed.bedNumber = input.bedNumber.trim();
+    }
+
+    if (input.status) {
+      if (bed.status === 'occupied' && input.status === 'available' && bed.currentTenant) {
+        throw new AppError(
+          'Cannot directly set an occupied bed to available while a tenant is assigned. Please use the checkout settlement process.',
+          400,
+        );
+      }
+      bed.status = input.status;
+      if (input.status === 'maintenance') {
+        bed.maintenanceNote = input.maintenanceNote || 'Under maintenance';
+      } else if (input.status === 'available') {
+        bed.maintenanceNote = undefined;
+        bed.noticeEndDate = undefined;
+      }
+      if (input.status === 'notice_period' && input.noticeEndDate) {
+        bed.noticeEndDate = new Date(input.noticeEndDate);
+      }
+    } else if (input.maintenanceNote !== undefined && bed.status === 'maintenance') {
+      bed.maintenanceNote = input.maintenanceNote;
+    }
+
+    await bed.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Bed ${bed.bedNumber} updated successfully`,
       data: bed,
     });
   } catch (error) {

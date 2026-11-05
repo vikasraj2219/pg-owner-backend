@@ -4,6 +4,7 @@ export interface IRoom extends Document {
   organization: mongoose.Types.ObjectId;
   property: mongoose.Types.ObjectId;
   floorNumber: number;
+  floorLabel?: string;
   roomNumber: string;
   sharingType: number; // 1 to 20 (number of beds)
   baseRentPaisePerBed: number; // Integer paise, e.g. 850000 = ₹8,500.00
@@ -33,6 +34,11 @@ const RoomSchema = new Schema<IRoom>(
         validator: Number.isInteger,
         message: 'Floor number must be an integer',
       },
+    },
+    floorLabel: {
+      type: String,
+      trim: true,
+      maxlength: [50, 'Floor label cannot exceed 50 characters'],
     },
     roomNumber: {
       type: String,

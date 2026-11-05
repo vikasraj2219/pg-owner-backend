@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getBedById, updateBedStatus, deleteBed } from '../controllers/bed.controller';
+import { getBedById, updateBedStatus, updateBed, deleteBed } from '../controllers/bed.controller';
 import { protect } from '../middleware/auth';
 import { enforceOrgScope } from '../middleware/enforceOrgScope';
 
@@ -10,6 +10,7 @@ router.use(protect);
 router.use(enforceOrgScope);
 
 router.get('/:id', getBedById);
+router.put('/:id', updateBed);
 router.put('/:id/status', updateBedStatus);
 router.delete('/:id', deleteBed);
 

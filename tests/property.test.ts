@@ -341,4 +341,52 @@ describe('Property & Room Management API (Stage 2 Backend)', () => {
       expect(res.status).toBe(403);
     });
   });
+
+  describe('Floor & Bed Operations', () => {
+    it('creates a new floor via POST /api/properties/:id/floors', async () => {
+      const res = await request(app)
+        .post(`/api/properties/${createdPropertyId}/floors`)
+        .set('Authorization', `Bearer ${tokenOrgA}`)
+        .send({ floorNumber: 3, floorLabel: 'Penthouse' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.floorNumber).toBe(3);
+      expect(res.body.data.floorLabel).toBe('Penthouse');
+    });
+
+    it('updates floor label via PUT /api/properties/:id/floors/:floorNumber', async () => {
+      const res = await request(app)
+        .put(`/api/properties/${createdPropertyId}/floors/3`)
+        .set('Authorization', `Bearer ${tokenOrgA}`)
+        .send({ floorLabel: 'Top Floor' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.floorLabel).toBe('Top Floor');
+    });
+
+    it('deletes vacant floor via DELETE /api/properties/:id/floors/:floorNumber', async () => {
+      const res = await request(app)
+        .delete(`/api/properties/${createdPropertyId}/floors/3`)
+        .set('Authorization', `Bearer ${tokenOrgA}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it('updates bed label via PUT /api/beds/:id', async () => {
+      const bed = await Bed.findOne({ property: createdPropertyId });
+      expect(bed).not.toBeNull();
+
+      const res = await request(app)
+        .put(`/api/beds/${bed!._id}`)
+        .set('Authorization', `Bearer ${tokenOrgA}`)
+        .send({ bedNumber: '101-VIP', status: 'maintenance', maintenanceNote: 'Repainting' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.bedNumber).toBe('101-VIP');
+      expect(res.body.data.status).toBe('maintenance');
+      expect(res.body.data.maintenanceNote).toBe('Repainting');
+    });
+  });
 });

@@ -7,9 +7,16 @@ export interface IProperty extends Document {
   name: string;
   type: PropertyType;
   address?: string;
+  city?: string;
+  pincode?: string;
   upiVpa: string;
   electricityRatePaisePerUnit: number; // Integer paise, e.g. 1200 = ₹12.00/unit
   isActive: boolean;
+  isArchived?: boolean;
+  floors?: Array<{
+    floorNumber: number;
+    floorLabel?: string;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,6 +48,16 @@ const PropertySchema = new Schema<IProperty>(
       trim: true,
       maxlength: [250, 'Address cannot exceed 250 characters'],
     },
+    city: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'City cannot exceed 100 characters'],
+    },
+    pincode: {
+      type: String,
+      trim: true,
+      maxlength: [20, 'Pincode cannot exceed 20 characters'],
+    },
     upiVpa: {
       type: String,
       required: [true, 'UPI VPA is required for rent collection'],
@@ -61,6 +78,23 @@ const PropertySchema = new Schema<IProperty>(
       type: Boolean,
       default: true,
     },
+    isArchived: {
+      type: Boolean,
+      default: false,
+    },
+    floors: [
+      {
+        floorNumber: {
+          type: Number,
+          required: true,
+        },
+        floorLabel: {
+          type: String,
+          trim: true,
+          maxlength: [50, 'Floor label cannot exceed 50 characters'],
+        },
+      },
+    ],
   },
   {
     timestamps: true,

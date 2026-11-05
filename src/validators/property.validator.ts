@@ -10,6 +10,8 @@ export const createPropertySchema = z.object({
     required_error: 'Property type must be boys, girls, or coliving',
   }),
   address: z.string().trim().max(250, 'Address cannot exceed 250 characters').optional(),
+  city: z.string().trim().max(100, 'City cannot exceed 100 characters').optional(),
+  pincode: z.string().trim().max(20, 'Pincode cannot exceed 20 characters').optional(),
   upiVpa: z
     .string({ required_error: 'UPI VPA is required' })
     .trim()
@@ -26,6 +28,8 @@ export const updatePropertySchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   type: z.enum(['boys', 'girls', 'coliving']).optional(),
   address: z.string().trim().max(250).optional(),
+  city: z.string().trim().max(100).optional(),
+  pincode: z.string().trim().max(20).optional(),
   upiVpa: z
     .string()
     .trim()
@@ -37,12 +41,14 @@ export const updatePropertySchema = z.object({
     .nonnegative()
     .optional(),
   isActive: z.boolean().optional(),
+  isArchived: z.boolean().optional(),
 });
 
 export const createRoomSchema = z.object({
   floorNumber: z
     .number({ required_error: 'Floor number is required' })
     .int('Floor number must be an integer'),
+  floorLabel: z.string().trim().max(50, 'Floor label cannot exceed 50 characters').optional(),
   roomNumber: z
     .string({ required_error: 'Room number is required' })
     .trim()
@@ -68,6 +74,7 @@ export const updateRoomSchema = z.object({
     .max(20, 'Room number cannot exceed 20 characters')
     .optional(),
   floorNumber: z.number().int('Floor number must be an integer').optional(),
+  floorLabel: z.string().trim().max(50, 'Floor label cannot exceed 50 characters').optional(),
   sharingType: z
     .number()
     .int('Sharing type must be a whole integer')
@@ -82,8 +89,27 @@ export const updateRoomSchema = z.object({
   tags: z.array(z.string().trim()).optional(),
 });
 
+export const createFloorSchema = z.object({
+  floorNumber: z
+    .number({ required_error: 'Floor number is required' })
+    .int('Floor number must be an integer'),
+  floorLabel: z.string().trim().max(50, 'Floor label cannot exceed 50 characters').optional(),
+});
+
+export const updateFloorSchema = z.object({
+  floorNumber: z.number().int('Floor number must be an integer').optional(),
+  floorLabel: z.string().trim().max(50, 'Floor label cannot exceed 50 characters').optional(),
+});
+
 export const addBedSchema = z.object({
   bedNumber: z.string().trim().min(1).max(20).optional(),
+});
+
+export const updateBedSchema = z.object({
+  bedNumber: z.string().trim().min(1).max(20).optional(),
+  status: z.enum(['available', 'occupied', 'notice_period', 'maintenance']).optional(),
+  maintenanceNote: z.string().trim().max(200).optional(),
+  noticeEndDate: z.union([z.string().datetime(), z.date()]).optional(),
 });
 
 export const updateBedStatusSchema = z.object({
@@ -98,4 +124,7 @@ export type CreatePropertyInput = z.infer<typeof createPropertySchema>;
 export type UpdatePropertyInput = z.infer<typeof updatePropertySchema>;
 export type CreateRoomInput = z.infer<typeof createRoomSchema>;
 export type UpdateRoomInput = z.infer<typeof updateRoomSchema>;
+export type CreateFloorInput = z.infer<typeof createFloorSchema>;
+export type UpdateFloorInput = z.infer<typeof updateFloorSchema>;
+export type UpdateBedInput = z.infer<typeof updateBedSchema>;
 export type UpdateBedStatusInput = z.infer<typeof updateBedStatusSchema>;
