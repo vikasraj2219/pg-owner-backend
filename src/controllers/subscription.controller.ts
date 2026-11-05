@@ -362,7 +362,7 @@ export const createRazorpayPaymentLink = async (
             orgId: orgId.toString(),
             plan,
           },
-          callback_url: 'https://pg-owner-backend.onrender.com/api/subscription/callback',
+          callback_url: `https://pg-owner-backend.onrender.com/api/subscription/callback?plan=${plan}&orgId=${orgId.toString()}`,
           callback_method: 'get',
         }),
       });
@@ -483,8 +483,64 @@ export const handlePaymentLinkCallback = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const { razorpay_payment_id, razorpay_payment_link_status } = req.query;
-    const isPaid = razorpay_payment_link_status === 'paid' || !!razorpay_payment_id;
+    const paymentId = (req.query.razorpay_payment_id as string) || '';
+    const paymentLinkId = (req.query.razorpay_payment_link_id as string) || '';
+    const paymentLinkStatus = (req.query.razorpay_payment_link_status as string) || '';
+    let plan = (req.query.plan as string) || '';
+    let orgId = (req.query.orgId as string) || '';
+
+    const isPaid = paymentLinkStatus === 'paid' || !!paymentId;
+
+    // If orgId/plan missing from callback URL, query Razorpay API if live keys are present
+    if (
+      isPaid &&
+      (!orgId || !plan) &&
+      paymentLinkId &&
+      env.RAZORPAY_KEY_ID &&
+      env.RAZORPAY_KEY_SECRET
+    ) {
+      try {
+        const authHeader =
+          'Basic ' +
+          Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
+        const rzpRes = await fetch(`https://api.razorpay.com/v1/payment_links/${paymentLinkId}`, {
+          headers: { Authorization: authHeader },
+        });
+        if (rzpRes.ok) {
+          const rzpData = (await rzpRes.json()) as any;
+          orgId = rzpData?.notes?.orgId || orgId;
+          plan = rzpData?.notes?.plan || plan;
+        }
+      } catch {
+        // Fallback to existing parameters
+      }
+    }
+
+    // Immediately update subscription in database so app has active state on redirect
+    if (isPaid && orgId && plan && ['starter', 'growth', 'pro'].includes(plan)) {
+      const limits = PLAN_LIMITS[plan as PlanType];
+      const planConfig = PLAN_PRICES[plan as PlanType];
+      const now = new Date();
+      const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      let subscription = await Subscription.findOne({ organization: orgId });
+      if (!subscription) {
+        subscription = new Subscription({ organization: orgId });
+      }
+
+      subscription.plan = plan as PlanType;
+      subscription.status = 'active';
+      subscription.maxProperties = limits.maxProperties;
+      subscription.maxBeds = limits.maxBeds;
+      subscription.currentPeriodEnd = periodEnd;
+      if (paymentId) subscription.razorpayPaymentId = paymentId;
+      if (paymentLinkId) subscription.razorpayOrderId = paymentLinkId;
+      subscription.lastPaymentAmount = (planConfig?.amountPaise || 0) / 100;
+      subscription.lastPaymentDate = now;
+      await subscription.save();
+    }
+
+    const appDeepLink = `pgowner://subscription?status=${isPaid ? 'success' : 'failed'}&plan=${encodeURIComponent(plan || '')}&payment_id=${encodeURIComponent(paymentId || '')}`;
 
     res.status(200).send(`
       <!DOCTYPE html>
@@ -493,21 +549,26 @@ export const handlePaymentLinkCallback = async (
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Nilaaya - Subscription Payment</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #F8F9FA; text-align: center; padding: 20px; }
-            .card { background: white; border-radius: 20px; padding: 32px 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 360px; width: 100%; }
-            .icon { width: 64px; height: 64px; border-radius: 50%; background: #ECFDF5; color: #0A6C50; display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 16px; font-weight: bold; }
-            h2 { color: #0F172A; margin: 0 0 8px; font-size: 20px; font-weight: 800; }
-            p { color: #64748B; font-size: 14px; margin: 0 0 24px; line-height: 1.5; }
-            .btn { background: #0A6C50; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 15px; display: block; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #F8F9FA; text-align: center; padding: 20px; box-sizing: border-box; }
+            .card { background: white; border-radius: 24px; padding: 36px 28px; box-shadow: 0 10px 25px rgba(0,0,0,0.06); max-width: 380px; width: 100%; box-sizing: border-box; }
+            .icon { width: 68px; height: 68px; border-radius: 50%; background: ${isPaid ? '#ECFDF5' : '#FEF2F2'}; color: ${isPaid ? '#0A6C50' : '#DC2626'}; display: flex; align-items: center; justify-content: center; font-size: 34px; margin: 0 auto 20px; font-weight: bold; }
+            h2 { color: #0F172A; margin: 0 0 10px; font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
+            p { color: #64748B; font-size: 14px; margin: 0 0 28px; line-height: 1.5; font-weight: 500; }
+            .btn { background: #0A6C50; color: white; padding: 15px 24px; border-radius: 14px; text-decoration: none; font-weight: 700; font-size: 15px; display: block; box-shadow: 0 4px 14px rgba(10, 108, 80, 0.25); }
           </style>
-          <meta http-equiv="refresh" content="1;url=pgowner://subscription" />
+          <meta http-equiv="refresh" content="1;url=${appDeepLink}" />
+          <script>
+            setTimeout(function() {
+              window.location.href = "${appDeepLink}";
+            }, 300);
+          </script>
         </head>
         <body>
           <div class="card">
-            <div class="icon">✓</div>
+            <div class="icon">${isPaid ? '✓' : '!'}</div>
             <h2>${isPaid ? 'Payment Confirmed!' : 'Processing Payment'}</h2>
-            <p>${isPaid ? 'Your subscription payment has been received. Returning you to the Nilaaya app...' : 'Please return to Nilaaya to check your status.'}</p>
-            <a class="btn" href="pgowner://subscription">Open Nilaaya App</a>
+            <p>${isPaid ? 'Your subscription payment has been received and activated! Returning you to Nilaaya...' : 'Please return to the Nilaaya app to check your account status.'}</p>
+            <a class="btn" href="${appDeepLink}">Open Nilaaya App</a>
           </div>
         </body>
       </html>

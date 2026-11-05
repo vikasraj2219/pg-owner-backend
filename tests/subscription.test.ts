@@ -201,5 +201,25 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
       expect(res.body.data.amount).toBe(49900);
       expect(res.body.data.plan).toBe('starter');
     });
+
+    it('GET /api/subscription/callback updates subscription in DB and deep links to app', async () => {
+      const res = await request(app).get(
+        `/api/subscription/callback?razorpay_payment_id=pay_callback_999&razorpay_payment_link_status=paid&plan=growth&orgId=${orgAId}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.text).toContain(
+        'pgowner://subscription?status=success&plan=growth&payment_id=pay_callback_999',
+      );
+
+      // Verify subscription in DB was updated immediately to active growth tier
+      const updatedSub = await Subscription.findOne({ organization: orgAId });
+      expect(updatedSub).toBeDefined();
+      expect(updatedSub?.plan).toBe('growth');
+      expect(updatedSub?.status).toBe('active');
+      expect(updatedSub?.maxProperties).toBe(3);
+      expect(updatedSub?.maxBeds).toBe(100);
+      expect(updatedSub?.razorpayPaymentId).toBe('pay_callback_999');
+    });
   });
 });
