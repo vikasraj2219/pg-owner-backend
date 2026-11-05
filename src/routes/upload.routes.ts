@@ -20,4 +20,3 @@ router.post('/kyc', protect, enforceOrgScope, uploadSingleDocument, uploadKycDoc
 router.delete('/:publicId', protect, enforceOrgScope, deleteDocument);
 
 export default router;
-

@@ -62,4 +62,3 @@ export const uploadSingleDocument = (req: Request, res: Response, next: NextFunc
     next();
   });
 };
-

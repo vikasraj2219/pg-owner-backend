@@ -532,7 +532,10 @@ export const getPropertyMatrix = async (
 
     // Fetch all beds for this property
     const beds = await Bed.find({ property: property._id, organization: orgId })
-      .populate('currentTenant', 'fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber')
+      .populate(
+        'currentTenant',
+        'fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber',
+      )
       .sort({ bedNumber: 1 });
 
     // Map beds by room ID

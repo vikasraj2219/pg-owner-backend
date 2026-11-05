@@ -1,4 +1,5 @@
 import request from 'supertest';
+import crypto from 'crypto';
 import { createApp } from '../src/app';
 import { startTestDatabase, stopTestDatabase } from './testDb';
 import { Organization } from '../src/models/Organization';
@@ -168,7 +169,7 @@ describe('Subscription Enforcement & Read-Only Paywall API (Stage 7 Backend)', (
 
       const paymentId = 'pay_test_123';
       const keySecret = process.env.RAZORPAY_KEY_SECRET || 'YuO4zCPfnhfbXrj9Lx3HpaKT';
-      const validSignature = require('crypto')
+      const validSignature = crypto
         .createHmac('sha256', keySecret)
         .update(`${orderRes.body.data.orderId}|${paymentId}`)
         .digest('hex');

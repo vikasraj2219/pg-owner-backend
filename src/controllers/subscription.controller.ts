@@ -44,17 +44,21 @@ export const getCurrentSubscription = async (
 
     const isReadOnly = isTrialExpired || isSubscriptionExpired;
 
-    const daysLeft = Math.max(
-      0,
-      Math.ceil(
-        ((subscription.status === 'trialing'
-          ? new Date(subscription.trialEndsAt)
-          : new Date(subscription.currentPeriodEnd)
-        ).getTime() -
-          now.getTime()) /
-          (1000 * 60 * 60 * 24),
-      ),
-    );
+    const targetDate =
+      subscription.status === 'trialing'
+        ? new Date(subscription.trialEndsAt)
+        : new Date(subscription.currentPeriodEnd);
+
+    const targetMidnight = new Date(
+      targetDate.getFullYear(),
+      targetDate.getMonth(),
+      targetDate.getDate(),
+    ).getTime();
+    const nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+    const daysLeft = isReadOnly
+      ? 0
+      : Math.max(0, Math.round((targetMidnight - nowMidnight) / (1000 * 60 * 60 * 24)));
 
     const propertiesUsed = await Property.countDocuments({ organization: orgId });
     const bedsUsed = await Bed.countDocuments({ organization: orgId });
@@ -433,15 +437,9 @@ export const handleRazorpayWebhook = async (
     const event = req.body.event;
     const payload = req.body.payload;
 
-    if (
-      event === 'order.paid' ||
-      event === 'payment.captured' ||
-      event === 'payment_link.paid'
-    ) {
+    if (event === 'order.paid' || event === 'payment.captured' || event === 'payment_link.paid') {
       const entity =
-        payload?.payment?.entity ||
-        payload?.order?.entity ||
-        payload?.payment_link?.entity;
+        payload?.payment?.entity || payload?.order?.entity || payload?.payment_link?.entity;
       const orgId = entity?.notes?.orgId;
       const plan = entity?.notes?.plan;
 
