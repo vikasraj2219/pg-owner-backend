@@ -28,6 +28,8 @@ export const updateTeamMemberSchema = z.object({
     .trim()
     .regex(/^[6-9]\d{9}$/)
     .optional(),
+  email: z.string().trim().email('Invalid email address').toLowerCase().optional(),
+  password: z.string().min(6, 'Password must be at least 6 characters long').optional(),
   role: z.enum(['manager', 'staff']).optional(),
   status: z.enum(['active', 'inactive']).optional(),
   assignedProperties: z

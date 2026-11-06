@@ -22,4 +22,15 @@ export const createMeterReadingSchema = z
     path: ['currentReading'],
   });
 
+export const updateMeterReadingSchema = z.object({
+  meterIdentifier: z.string().trim().optional(),
+  previousReading: z.number().nonnegative().optional(),
+  currentReading: z.number().nonnegative().optional(),
+  ratePaisePerUnit: z.number().int().nonnegative().optional(),
+  readingDate: z.string().or(z.date()).optional(),
+  photoUrl: z.string().trim().optional(),
+  splitMethod: z.enum(['equal', 'by_days_occupied']).optional(),
+});
+
 export type CreateMeterReadingInput = z.infer<typeof createMeterReadingSchema>;
+export type UpdateMeterReadingInput = z.infer<typeof updateMeterReadingSchema>;

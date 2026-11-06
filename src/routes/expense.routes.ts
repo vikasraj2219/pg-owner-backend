@@ -5,6 +5,7 @@ import {
   createExpense,
   getExpenses,
   getPnLSummary,
+  updateExpense,
   deleteExpense,
 } from '../controllers/expense.controller';
 
@@ -16,6 +17,7 @@ router.use(enforceOrgScope);
 router.post('/', createExpense);
 router.get('/', getExpenses);
 router.get('/pnl', getPnLSummary);
+router.put('/:id', updateExpense);
 router.delete('/:id', deleteExpense);
 
 export default router;

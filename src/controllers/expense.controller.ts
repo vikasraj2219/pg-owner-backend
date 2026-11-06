@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { Expense, Payment, Property } from '../models';
-import { createExpenseSchema } from '../validators/expense.validator';
+import { createExpenseSchema, updateExpenseSchema } from '../validators/expense.validator';
 
 /**
  * Record a new operational expense in integer paise
@@ -192,6 +192,62 @@ export const getPnLSummary = async (
         totalExpensesCount: expenses.length,
         totalPaymentsCount: payments.length,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update an existing expense
+ * PUT /api/expenses/:id
+ */
+export const updateExpense = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid expense ID format', 400);
+    }
+
+    const expense = await Expense.findOne({ _id: id, organization: orgId });
+    if (!expense) {
+      throw new AppError('Expense not found or does not belong to your organization', 404);
+    }
+
+    const validated = updateExpenseSchema.parse(req.body);
+
+    if (validated.propertyId !== undefined) {
+      if (validated.propertyId) {
+        const prop = await Property.findOne({ _id: validated.propertyId, organization: orgId });
+        if (!prop) {
+          throw new AppError('Property not found or does not belong to your organization', 404);
+        }
+        expense.property = new mongoose.Types.ObjectId(validated.propertyId);
+      } else {
+        expense.property = undefined;
+      }
+    }
+
+    if (validated.category !== undefined) expense.category = validated.category;
+    if (validated.amountPaise !== undefined) expense.amountPaise = validated.amountPaise;
+    if (validated.description !== undefined) expense.description = validated.description;
+    if (validated.date !== undefined) expense.date = new Date(validated.date);
+    if (validated.paymentMethod !== undefined) expense.paymentMethod = validated.paymentMethod;
+    if (validated.paidTo !== undefined) expense.paidTo = validated.paidTo.trim() || undefined;
+    if (validated.receiptUrl !== undefined) expense.receiptUrl = validated.receiptUrl;
+
+    await expense.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Expense updated successfully',
+      data: expense,
     });
   } catch (error) {
     next(error);

@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { protect } from '../middleware/auth';
 import { enforceOrgScope } from '../middleware/enforceOrgScope';
-import { recordReading, getReadings, getLatestRoomReading } from '../controllers/meter.controller';
+import {
+  recordReading,
+  updateReading,
+  deleteReading,
+  getReadings,
+  getLatestRoomReading,
+} from '../controllers/meter.controller';
 
 const router = Router();
 
@@ -9,6 +15,8 @@ router.use(protect);
 router.use(enforceOrgScope);
 
 router.post('/reading', recordReading);
+router.put('/reading/:id', updateReading);
+router.delete('/reading/:id', deleteReading);
 router.get('/readings', getReadings);
 router.get('/room/:roomId/latest', getLatestRoomReading);
 

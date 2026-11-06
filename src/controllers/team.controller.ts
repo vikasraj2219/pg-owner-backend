@@ -157,7 +157,27 @@ export const updateTeamMember = async (
     }
 
     if (validated.name) member.name = validated.name;
-    if (validated.phone) member.phone = validated.phone;
+    if (validated.phone) {
+      if (validated.phone !== member.phone) {
+        const dupPhone = await User.findOne({ phone: validated.phone, _id: { $ne: member._id } });
+        if (dupPhone) {
+          throw new AppError('A user with this phone number already exists', 409);
+        }
+      }
+      member.phone = validated.phone;
+    }
+    if (validated.email) {
+      if (validated.email !== member.email) {
+        const dupEmail = await User.findOne({ email: validated.email, _id: { $ne: member._id } });
+        if (dupEmail) {
+          throw new AppError('A user with this email already exists', 409);
+        }
+      }
+      member.email = validated.email;
+    }
+    if (validated.password) {
+      member.password = validated.password;
+    }
     if (validated.role) member.role = validated.role;
     if (validated.status) member.status = validated.status;
 

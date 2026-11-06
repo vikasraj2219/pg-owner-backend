@@ -258,5 +258,38 @@ describe('Sub-meter Electricity Reader API (Stage 6 Backend)', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.length).toBe(0);
     });
+
+    it('updates an existing reading via PUT /api/meters/reading/:id', async () => {
+      const readings = await request(app)
+        .get('/api/meters/readings')
+        .set('Authorization', `Bearer ${orgAToken}`);
+      const readingId = readings.body.data[0]._id;
+
+      const res = await request(app)
+        .put(`/api/meters/reading/${readingId}`)
+        .set('Authorization', `Bearer ${orgAToken}`)
+        .send({
+          currentReading: 1300,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.currentReading).toBe(1300);
+      expect(res.body.data.unitsConsumed).toBe(100);
+    });
+
+    it('deletes a meter reading via DELETE /api/meters/reading/:id', async () => {
+      const readings = await request(app)
+        .get('/api/meters/readings')
+        .set('Authorization', `Bearer ${orgAToken}`);
+      const readingId = readings.body.data[0]._id;
+
+      const res = await request(app)
+        .delete(`/api/meters/reading/${readingId}`)
+        .set('Authorization', `Bearer ${orgAToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
   });
 });

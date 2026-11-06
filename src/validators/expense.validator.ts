@@ -29,4 +29,21 @@ export const createExpenseSchema = z.object({
   paidTo: z.string().trim().optional(),
 });
 
+export const updateExpenseSchema = z.object({
+  propertyId: z
+    .string()
+    .refine(val => mongoose.Types.ObjectId.isValid(val), {
+      message: 'Invalid property ID format',
+    })
+    .optional(),
+  category: expenseCategoryEnum.optional(),
+  amountPaise: z.number().int().positive('Amount must be a positive integer in paise').optional(),
+  description: z.string().trim().min(2, 'Description must be at least 2 characters').optional(),
+  date: z.string().or(z.date()).optional(),
+  receiptUrl: z.string().trim().optional(),
+  paymentMethod: z.enum(['cash', 'upi', 'bank_transfer']).optional(),
+  paidTo: z.string().trim().optional(),
+});
+
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
+export type UpdateExpenseInput = z.infer<typeof updateExpenseSchema>;
