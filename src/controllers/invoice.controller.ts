@@ -8,6 +8,7 @@ import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
 import { generateInvoiceNumber } from '../services/invoiceNumber.service';
 import { generateReceiptNumber } from '../services/receiptNumber.service';
+import { calculateJoinDateCycle } from '../services/proration.service';
 import { generateMonthlyInvoicesSchema, markPaidSchema } from '../validators/invoice.validator';
 import { env } from '../config/env';
 
@@ -221,9 +222,6 @@ export const generateMonthlyInvoices = async (
       const org = await Organization.findById(targetId);
       if (!org) continue;
 
-      const rentDueDay = Math.min(28, Math.max(1, org.settings?.rentDueDay ?? 1));
-      const dueDate = new Date(targetYear, targetMonth - 1, rentDueDay, 23, 59, 59, 999);
-
       const assignmentFilter: Record<string, unknown> = {
         organization: targetId,
         status: 'active',
@@ -234,12 +232,19 @@ export const generateMonthlyInvoices = async (
 
       const activeAssignments = await BedAssignment.find(assignmentFilter).populate(
         'tenant',
-        'fullName status',
+        'fullName status billingCycleDay joinDate createdAt',
       );
 
       for (const assignment of activeAssignments) {
         if (!assignment.tenant) continue;
-        const tenantId = (assignment.tenant as { _id: mongoose.Types.ObjectId })._id;
+        const tenant = assignment.tenant as unknown as {
+          _id: mongoose.Types.ObjectId;
+          fullName: string;
+          billingCycleDay?: number;
+          joinDate?: Date;
+          createdAt?: Date;
+        };
+        const tenantId = tenant._id;
 
         // Idempotency check: see if invoice already exists for this tenant in this month/year
         const existingInvoice = await Invoice.findOne({
@@ -252,6 +257,10 @@ export const generateMonthlyInvoices = async (
           skippedCount++;
           continue;
         }
+
+        // Determine tenant's join date billing cycle
+        const tenantJoinDate = tenant.joinDate || assignment.startDate || tenant.createdAt || new Date();
+        const cycle = calculateJoinDateCycle(new Date(tenantJoinDate), targetMonth, targetYear);
 
         const invoiceNumber = await generateInvoiceNumber(
           targetId.toString(),
@@ -269,10 +278,12 @@ export const generateMonthlyInvoices = async (
             invoiceNumber,
             month: targetMonth,
             year: targetYear,
-            dueDate,
+            dueDate: cycle.periodStart, // Due on tenant's join date anniversary
+            periodStart: cycle.periodStart,
+            periodEnd: cycle.periodEnd,
             items: [
               {
-                description: `Monthly Rent - ${monthName}`,
+                description: cycle.description,
                 amountPaise: rentPaise,
                 category: 'rent',
               },

@@ -12,6 +12,7 @@ const BedAssignment_1 = require("../models/BedAssignment");
 const errorHandler_1 = require("../middleware/errorHandler");
 const invoiceNumber_service_1 = require("../services/invoiceNumber.service");
 const receiptNumber_service_1 = require("../services/receiptNumber.service");
+const proration_service_1 = require("../services/proration.service");
 const invoice_validator_1 = require("../validators/invoice.validator");
 const env_1 = require("../config/env");
 const MONTH_NAMES = [
@@ -187,8 +188,6 @@ const generateMonthlyInvoices = async (req, res, next) => {
             const org = await Organization_1.Organization.findById(targetId);
             if (!org)
                 continue;
-            const rentDueDay = Math.min(28, Math.max(1, org.settings?.rentDueDay ?? 1));
-            const dueDate = new Date(targetYear, targetMonth - 1, rentDueDay, 23, 59, 59, 999);
             const assignmentFilter = {
                 organization: targetId,
                 status: 'active',
@@ -196,11 +195,12 @@ const generateMonthlyInvoices = async (req, res, next) => {
             if (filterPropertyId) {
                 assignmentFilter.property = filterPropertyId;
             }
-            const activeAssignments = await BedAssignment_1.BedAssignment.find(assignmentFilter).populate('tenant', 'fullName status');
+            const activeAssignments = await BedAssignment_1.BedAssignment.find(assignmentFilter).populate('tenant', 'fullName status billingCycleDay joinDate createdAt');
             for (const assignment of activeAssignments) {
                 if (!assignment.tenant)
                     continue;
-                const tenantId = assignment.tenant._id;
+                const tenant = assignment.tenant;
+                const tenantId = tenant._id;
                 // Idempotency check: see if invoice already exists for this tenant in this month/year
                 const existingInvoice = await Invoice_1.Invoice.findOne({
                     tenant: tenantId,
@@ -211,6 +211,9 @@ const generateMonthlyInvoices = async (req, res, next) => {
                     skippedCount++;
                     continue;
                 }
+                // Determine tenant's join date billing cycle
+                const tenantJoinDate = tenant.joinDate || assignment.startDate || tenant.createdAt || new Date();
+                const cycle = (0, proration_service_1.calculateJoinDateCycle)(new Date(tenantJoinDate), targetMonth, targetYear);
                 const invoiceNumber = await (0, invoiceNumber_service_1.generateInvoiceNumber)(targetId.toString(), targetYear, targetMonth);
                 const rentPaise = assignment.monthlyRentPaise;
                 try {
@@ -221,10 +224,12 @@ const generateMonthlyInvoices = async (req, res, next) => {
                         invoiceNumber,
                         month: targetMonth,
                         year: targetYear,
-                        dueDate,
+                        dueDate: cycle.periodStart, // Due on tenant's join date anniversary
+                        periodStart: cycle.periodStart,
+                        periodEnd: cycle.periodEnd,
                         items: [
                             {
-                                description: `Monthly Rent - ${monthName}`,
+                                description: cycle.description,
                                 amountPaise: rentPaise,
                                 category: 'rent',
                             },

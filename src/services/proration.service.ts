@@ -77,3 +77,55 @@ export const calculateProratedRent = (
     isProrated: true,
   };
 };
+
+export interface JoinDateCycleResult {
+  periodStart: Date;
+  periodEnd: Date;
+  billingDay: number;
+  month: number;
+  year: number;
+  description: string;
+}
+
+/**
+ * Calculates the exact anniversary billing cycle for a tenant based on their joining date.
+ * (e.g. 15 Nov to 14 Dec, 1 full month).
+ */
+export const calculateJoinDateCycle = (
+  joinDate: Date,
+  targetMonth?: number,
+  targetYear?: number,
+): JoinDateCycleResult => {
+  const joinDay = joinDate.getDate();
+  const year = targetYear ?? joinDate.getFullYear();
+  const month = targetMonth ?? joinDate.getMonth() + 1; // 1-12
+
+  // Handle month length (e.g. day is 31, but Feb only has 28 days)
+  const daysInCycleMonth = getDaysInMonth(year, month);
+  const startDay = Math.min(joinDay, daysInCycleMonth);
+
+  const periodStart = new Date(year, month - 1, startDay, 0, 0, 0, 0);
+
+  // Period end is 1 month later minus 1 day
+  const nextMonthYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const daysInNextMonth = getDaysInMonth(nextMonthYear, nextMonth);
+  const endDay = Math.min(startDay, daysInNextMonth);
+
+  const periodEnd = new Date(nextMonthYear, nextMonth - 1, endDay, 23, 59, 59, 999);
+  periodEnd.setDate(periodEnd.getDate() - 1);
+
+  const formatShort = (d: Date) =>
+    d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  const description = `Rent (${formatShort(periodStart)} - ${formatShort(periodEnd)})`;
+
+  return {
+    periodStart,
+    periodEnd,
+    billingDay: startDay,
+    month,
+    year,
+    description,
+  };
+};

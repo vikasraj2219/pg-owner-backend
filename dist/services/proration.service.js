@@ -6,7 +6,7 @@
  * where T = total days in month, D = day of month of joining.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.calculateProratedRent = exports.getDaysInMonth = void 0;
+exports.calculateJoinDateCycle = exports.calculateProratedRent = exports.getDaysInMonth = void 0;
 /**
  * Returns total days in a given month (1-indexed month: 1 = Jan, 12 = Dec).
  */
@@ -60,3 +60,34 @@ const calculateProratedRent = (monthlyRentPaise, joinDate) => {
     };
 };
 exports.calculateProratedRent = calculateProratedRent;
+/**
+ * Calculates the exact anniversary billing cycle for a tenant based on their joining date.
+ * (e.g. 15 Nov to 14 Dec, 1 full month).
+ */
+const calculateJoinDateCycle = (joinDate, targetMonth, targetYear) => {
+    const joinDay = joinDate.getDate();
+    const year = targetYear ?? joinDate.getFullYear();
+    const month = targetMonth ?? joinDate.getMonth() + 1; // 1-12
+    // Handle month length (e.g. day is 31, but Feb only has 28 days)
+    const daysInCycleMonth = (0, exports.getDaysInMonth)(year, month);
+    const startDay = Math.min(joinDay, daysInCycleMonth);
+    const periodStart = new Date(year, month - 1, startDay, 0, 0, 0, 0);
+    // Period end is 1 month later minus 1 day
+    const nextMonthYear = month === 12 ? year + 1 : year;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const daysInNextMonth = (0, exports.getDaysInMonth)(nextMonthYear, nextMonth);
+    const endDay = Math.min(startDay, daysInNextMonth);
+    const periodEnd = new Date(nextMonthYear, nextMonth - 1, endDay, 23, 59, 59, 999);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+    const formatShort = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const description = `Rent (${formatShort(periodStart)} - ${formatShort(periodEnd)})`;
+    return {
+        periodStart,
+        periodEnd,
+        billingDay: startDay,
+        month,
+        year,
+        description,
+    };
+};
+exports.calculateJoinDateCycle = calculateJoinDateCycle;

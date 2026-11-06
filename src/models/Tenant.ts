@@ -14,6 +14,8 @@ export interface ITenant extends Document {
   monthlyRentPaise: number; // Integer paise
   depositPaise: number; // Integer paise
   depositPaidPaise: number; // Integer paise
+  joinDate?: Date;
+  billingCycleDay?: number; // 1-31 (Day of month rent is due)
   kycDocType?: KycDocType;
   kycMaskedNumber?: string;
   kycDocUrl?: string;
@@ -78,6 +80,15 @@ const TenantSchema = new Schema<ITenant>(
       type: Number,
       default: 0,
       min: 0,
+    },
+    joinDate: {
+      type: Date,
+      default: Date.now,
+    },
+    billingCycleDay: {
+      type: Number,
+      min: 1,
+      max: 31,
     },
     kycDocType: {
       type: String,

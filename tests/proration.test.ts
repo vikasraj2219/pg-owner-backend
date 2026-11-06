@@ -1,4 +1,8 @@
-import { calculateProratedRent, getDaysInMonth } from '../src/services/proration.service';
+import {
+  calculateProratedRent,
+  calculateJoinDateCycle,
+  getDaysInMonth,
+} from '../src/services/proration.service';
 
 describe('Proration Service (Stage 3 Backend)', () => {
   describe('getDaysInMonth', () => {
@@ -127,6 +131,54 @@ describe('Proration Service (Stage 3 Backend)', () => {
       expect(() => calculateProratedRent(-5000, joinDate)).toThrow(
         'Monthly rent cannot be negative',
       );
+    });
+  });
+
+  describe('calculateJoinDateCycle (Anniversary Join-Date Billing)', () => {
+    it('generates 1 full month cycle from mid-month join date (15 Nov to 14 Dec)', () => {
+      const joinDate = new Date(2026, 10, 15); // Nov 15, 2026
+      const cycle = calculateJoinDateCycle(joinDate);
+
+      expect(cycle.billingDay).toBe(15);
+      expect(cycle.periodStart.getDate()).toBe(15);
+      expect(cycle.periodStart.getMonth()).toBe(10); // Nov
+      expect(cycle.periodEnd.getDate()).toBe(14);
+      expect(cycle.periodEnd.getMonth()).toBe(11); // Dec
+      expect(cycle.month).toBe(11);
+      expect(cycle.year).toBe(2026);
+      expect(cycle.description).toContain('15 Nov 2026 - 14 Dec 2026');
+    });
+
+    it('generates accurate cycle from 1st of month (1 Jan to 31 Jan)', () => {
+      const joinDate = new Date(2026, 0, 1); // Jan 1, 2026
+      const cycle = calculateJoinDateCycle(joinDate);
+
+      expect(cycle.billingDay).toBe(1);
+      expect(cycle.periodStart.getDate()).toBe(1);
+      expect(cycle.periodStart.getMonth()).toBe(0); // Jan
+      expect(cycle.periodEnd.getDate()).toBe(31);
+      expect(cycle.periodEnd.getMonth()).toBe(0); // Jan 31
+    });
+
+    it('handles year rollover (15 Dec 2026 to 14 Jan 2027)', () => {
+      const joinDate = new Date(2026, 11, 15); // Dec 15, 2026
+      const cycle = calculateJoinDateCycle(joinDate);
+
+      expect(cycle.periodStart.getFullYear()).toBe(2026);
+      expect(cycle.periodStart.getMonth()).toBe(11); // Dec
+      expect(cycle.periodEnd.getFullYear()).toBe(2027);
+      expect(cycle.periodEnd.getMonth()).toBe(0); // Jan
+      expect(cycle.periodEnd.getDate()).toBe(14);
+    });
+
+    it('clamps 31st join date gracefully for shorter months (e.g. Feb in common year)', () => {
+      const joinDate = new Date(2026, 0, 31); // Jan 31, 2026
+      // Generate cycle for February (month 2)
+      const cycle = calculateJoinDateCycle(joinDate, 2, 2026);
+
+      expect(cycle.billingDay).toBe(28); // Clamped to 28 Feb
+      expect(cycle.periodStart.getDate()).toBe(28);
+      expect(cycle.periodStart.getMonth()).toBe(1); // Feb
     });
   });
 });

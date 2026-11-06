@@ -7,27 +7,11 @@ import { Tenant } from '../models/Tenant';
 import { BedAssignment } from '../models/BedAssignment';
 import { Invoice } from '../models/Invoice';
 import { DepositLedger } from '../models/DepositLedger';
-import { Organization } from '../models/Organization';
 import { Subscription } from '../models/Subscription';
-import { calculateProratedRent } from '../services/proration.service';
+import { calculateJoinDateCycle } from '../services/proration.service';
 import { generateInvoiceNumber } from '../services/invoiceNumber.service';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
-
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
 
 export const quickCheckin = async (
   req: AuthenticatedRequest,
@@ -91,25 +75,16 @@ export const quickCheckin = async (
       }
     }
 
-    // 4. Prepare Dates and Proration
+    // 4. Prepare Dates and Join-Date Anniversary Billing Cycle
     const joinDateObj = new Date(input.joinDate);
-    const proration = calculateProratedRent(input.monthlyRentPaise, joinDateObj);
-    const monthName = MONTH_NAMES[proration.month - 1];
-
-    // Calculate invoice due date based on organization settings
-    const org = await Organization.findById(orgId);
-    const dueDay = org?.settings?.rentDueDay || 5;
-    const dueDate = new Date(proration.year, proration.month - 1, dueDay);
-    // If due date has passed in the current month, set due date 3 days from join date
-    if (dueDate.getTime() < joinDateObj.getTime()) {
-      dueDate.setTime(joinDateObj.getTime() + 3 * 24 * 60 * 60 * 1000);
-    }
+    const cycle = calculateJoinDateCycle(joinDateObj);
+    const dueDate = new Date(joinDateObj); // Due upon joining
 
     // Generate unique invoice number
     const invoiceNumber = await generateInvoiceNumber(
       orgId.toString(),
-      proration.year,
-      proration.month,
+      cycle.year,
+      cycle.month,
     );
 
     // 4. Run single transaction check-in
@@ -137,6 +112,8 @@ export const quickCheckin = async (
             monthlyRentPaise: input.monthlyRentPaise,
             depositPaise: input.depositPaise,
             depositPaidPaise: input.depositPaidPaise,
+            joinDate: joinDateObj,
+            billingCycleDay: cycle.billingDay,
             kycDocType: input.kycDocType,
             kycMaskedNumber: input.kycMaskedNumber ? input.kycMaskedNumber.trim() : undefined,
             kycDocUrl: input.kycDocUrl ? input.kycDocUrl.trim() : undefined,
@@ -200,11 +177,7 @@ export const quickCheckin = async (
         depositRecord = createdDeposits[0];
       }
 
-      // E. Generate First Prorated Rent Invoice
-      const rentDescription = proration.isProrated
-        ? `Prorated Rent (${proration.billableDays} days: ${proration.joinDay} to ${proration.totalDays} ${monthName})`
-        : `Full Month Rent (${monthName} ${proration.year})`;
-
+      // E. Generate First Join-Date Full Month Rent Invoice
       const createdInvoices = await Invoice.create(
         [
           {
@@ -212,19 +185,21 @@ export const quickCheckin = async (
             property: property._id,
             tenant: tenant._id,
             invoiceNumber,
-            month: proration.month,
-            year: proration.year,
+            month: cycle.month,
+            year: cycle.year,
             dueDate,
+            periodStart: cycle.periodStart,
+            periodEnd: cycle.periodEnd,
             items: [
               {
-                description: rentDescription,
-                amountPaise: proration.payablePaise,
+                description: cycle.description,
+                amountPaise: input.monthlyRentPaise,
                 category: 'rent',
               },
             ],
-            totalAmountPaise: proration.payablePaise,
+            totalAmountPaise: input.monthlyRentPaise,
             amountPaidPaise: 0,
-            balanceDuePaise: proration.payablePaise,
+            balanceDuePaise: input.monthlyRentPaise,
             status: 'unpaid',
           },
         ],
@@ -250,7 +225,13 @@ export const quickCheckin = async (
           },
           invoice,
           deposit: depositRecord,
-          proration,
+          proration: {
+            payablePaise: input.monthlyRentPaise,
+            periodStart: cycle.periodStart,
+            periodEnd: cycle.periodEnd,
+            billingDay: cycle.billingDay,
+            isProrated: false,
+          },
         },
       });
     } catch (txError) {

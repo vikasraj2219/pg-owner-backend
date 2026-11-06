@@ -88,6 +88,15 @@ const TenantSchema = new mongoose_1.Schema({
         default: 0,
         min: 0,
     },
+    joinDate: {
+        type: Date,
+        default: Date.now,
+    },
+    billingCycleDay: {
+        type: Number,
+        min: 1,
+        max: 31,
+    },
     kycDocType: {
         type: String,
         enum: ['aadhaar', 'pan', 'passport', 'voter_id'],

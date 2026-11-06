@@ -17,6 +17,8 @@ export interface IInvoice extends Document {
   month: number; // 1-12
   year: number; // e.g. 2026
   dueDate: Date;
+  periodStart?: Date;
+  periodEnd?: Date;
   items: IInvoiceItem[];
   totalAmountPaise: number; // Integer paise
   amountPaidPaise: number; // Integer paise
@@ -90,6 +92,14 @@ const InvoiceSchema = new Schema<IInvoice>(
     dueDate: {
       type: Date,
       required: [true, 'Due date is required'],
+    },
+    periodStart: {
+      type: Date,
+      default: null,
+    },
+    periodEnd: {
+      type: Date,
+      default: null,
     },
     items: {
       type: [InvoiceItemSchema],

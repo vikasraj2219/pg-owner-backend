@@ -94,6 +94,14 @@ const InvoiceSchema = new mongoose_1.Schema({
         type: Date,
         required: [true, 'Due date is required'],
     },
+    periodStart: {
+        type: Date,
+        default: null,
+    },
+    periodEnd: {
+        type: Date,
+        default: null,
+    },
     items: {
         type: [InvoiceItemSchema],
         required: [true, 'Invoice must have at least one line item'],
