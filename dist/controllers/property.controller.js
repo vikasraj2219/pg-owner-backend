@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPropertyMatrix = exports.addBedToRoom = exports.deleteRoom = exports.updateRoom = exports.getPropertyRooms = exports.createRoom = exports.deleteProperty = exports.updateProperty = exports.getPropertyById = exports.getProperties = exports.createProperty = exports.getBedSuffix = void 0;
+exports.deleteFloor = exports.updateFloor = exports.createFloor = exports.getPropertyMatrix = exports.addBedToRoom = exports.deleteRoom = exports.updateRoom = exports.getPropertyRooms = exports.createRoom = exports.deleteProperty = exports.updateProperty = exports.getPropertyById = exports.getProperties = exports.createProperty = exports.getBedSuffix = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const property_validator_1 = require("../validators/property.validator");
 const Property_1 = require("../models/Property");
@@ -77,6 +77,9 @@ const getProperties = async (req, res, next) => {
         const properties = await Property_1.Property.find({ organization: orgId }).sort({ createdAt: -1 });
         // Aggregate stats for each property
         const propertiesWithStats = await Promise.all(properties.map(async (property) => {
+            const distinctFloors = await Room_1.Room.distinct('floorNumber', { property: property._id });
+            const registeredFloors = (property.floors || []).map(f => f.floorNumber);
+            const totalFloors = new Set([...distinctFloors, ...registeredFloors]).size;
             const totalRooms = await Room_1.Room.countDocuments({ property: property._id });
             const [totalBeds, occupiedBeds, availableBeds] = await Promise.all([
                 Bed_1.Bed.countDocuments({ property: property._id }),
@@ -86,6 +89,7 @@ const getProperties = async (req, res, next) => {
             return {
                 ...property.toJSON(),
                 stats: {
+                    totalFloors,
                     totalRooms,
                     totalBeds,
                     occupiedBeds,
@@ -287,12 +291,31 @@ const createRoom = async (req, res, next) => {
                     organization: orgId,
                     property: property._id,
                     floorNumber: input.floorNumber,
+                    floorLabel: input.floorLabel?.trim() || undefined,
                     roomNumber: input.roomNumber.trim(),
                     sharingType: input.sharingType,
                     baseRentPaisePerBed: input.baseRentPaisePerBed,
                     tags: input.tags || [],
                 },
             ], sessionOpts);
+            // Ensure floor is tracked in property
+            if (!property.floors)
+                property.floors = [];
+            const floorIdx = property.floors.findIndex(f => f.floorNumber === input.floorNumber);
+            if (floorIdx >= 0) {
+                const floorObj = property.floors[floorIdx];
+                if (input.floorLabel && floorObj && !floorObj.floorLabel) {
+                    floorObj.floorLabel = input.floorLabel.trim();
+                    await property.save(sessionOpts);
+                }
+            }
+            else {
+                property.floors.push({
+                    floorNumber: input.floorNumber,
+                    floorLabel: input.floorLabel?.trim() || undefined,
+                });
+                await property.save(sessionOpts);
+            }
             const room = createdRooms[0];
             if (!room) {
                 throw new errorHandler_1.AppError('Failed to initialize room record', 500);
@@ -388,7 +411,8 @@ const updateRoom = async (req, res, next) => {
             throw new errorHandler_1.AppError('Room not found or does not belong to your organization', 404);
         }
         // 1. Update room number if provided and different
-        if (input.roomNumber && input.roomNumber.trim().toLowerCase() !== room.roomNumber.toLowerCase()) {
+        if (input.roomNumber &&
+            input.roomNumber.trim().toLowerCase() !== room.roomNumber.toLowerCase()) {
             const duplicate = await Room_1.Room.findOne({
                 _id: { $ne: room._id },
                 property: room.property,
@@ -413,6 +437,9 @@ const updateRoom = async (req, res, next) => {
         // 2. Update floor number if provided
         if (input.floorNumber !== undefined) {
             room.floorNumber = input.floorNumber;
+        }
+        if (input.floorLabel !== undefined) {
+            room.floorLabel = input.floorLabel.trim() || undefined;
         }
         // 3. Update rent if provided
         if (input.baseRentPaisePerBed !== undefined) {
@@ -611,8 +638,20 @@ const getPropertyMatrix = async (req, res, next) => {
             existing.push(bed);
             bedsByRoom.set(rId, existing);
         });
-        // Group rooms by floor
         const floorsMap = new Map();
+        // Prepopulate registered floors if any
+        if (property.floors && Array.isArray(property.floors)) {
+            property.floors.forEach(f => {
+                floorsMap.set(f.floorNumber, {
+                    floorNumber: f.floorNumber,
+                    floorLabel: f.floorLabel || undefined,
+                    rooms: [],
+                    totalRooms: 0,
+                    totalBeds: 0,
+                    occupiedBeds: 0,
+                });
+            });
+        }
         rooms.forEach(room => {
             const roomBeds = bedsByRoom.get(room._id.toString()) || [];
             const formattedBeds = roomBeds.map(bed => ({
@@ -628,22 +667,31 @@ const getPropertyMatrix = async (req, res, next) => {
                 _id: room._id,
                 roomNumber: room.roomNumber,
                 floorNumber: room.floorNumber,
+                floorLabel: room.floorLabel,
                 sharingType: room.sharingType,
                 baseRentPaisePerBed: room.baseRentPaisePerBed,
                 tags: room.tags,
                 beds: formattedBeds,
             };
-            const floorRooms = floorsMap.get(room.floorNumber) || [];
-            floorRooms.push(roomData);
-            floorsMap.set(room.floorNumber, floorRooms);
+            const floorEntry = floorsMap.get(room.floorNumber) || {
+                floorNumber: room.floorNumber,
+                floorLabel: room.floorLabel || undefined,
+                rooms: [],
+                totalRooms: 0,
+                totalBeds: 0,
+                occupiedBeds: 0,
+            };
+            if (room.floorLabel && !floorEntry.floorLabel) {
+                floorEntry.floorLabel = room.floorLabel;
+            }
+            floorEntry.rooms.push(roomData);
+            floorEntry.totalRooms += 1;
+            floorEntry.totalBeds += roomBeds.length;
+            floorEntry.occupiedBeds += roomBeds.filter(b => b.status === 'occupied').length;
+            floorsMap.set(room.floorNumber, floorEntry);
         });
         // Sort floors in ascending order
-        const floors = Array.from(floorsMap.entries())
-            .sort(([a], [b]) => a - b)
-            .map(([floorNumber, floorRooms]) => ({
-            floorNumber,
-            rooms: floorRooms,
-        }));
+        const floors = Array.from(floorsMap.values()).sort((a, b) => a.floorNumber - b.floorNumber);
         // Calculate overall stats
         const totalBeds = beds.length;
         const occupiedBeds = beds.filter(b => b.status === 'occupied').length;
@@ -659,8 +707,11 @@ const getPropertyMatrix = async (req, res, next) => {
                     name: property.name,
                     type: property.type,
                     address: property.address,
+                    city: property.city,
+                    pincode: property.pincode,
                     upiVpa: property.upiVpa,
                     electricityRatePaisePerUnit: property.electricityRatePaisePerUnit,
+                    isArchived: property.isArchived,
                 },
                 floors,
                 summary: {
@@ -680,3 +731,166 @@ const getPropertyMatrix = async (req, res, next) => {
     }
 };
 exports.getPropertyMatrix = getPropertyMatrix;
+// ==========================================
+// FLOOR CONTROLLERS
+// ==========================================
+const createFloor = async (req, res, next) => {
+    try {
+        const { id: propertyId } = req.params;
+        const orgId = req.orgId;
+        if (!propertyId || !mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
+            throw new errorHandler_1.AppError('Invalid property ID format', 400);
+        }
+        const property = await Property_1.Property.findOne({ _id: propertyId, organization: orgId });
+        if (!property) {
+            throw new errorHandler_1.AppError('Property not found or does not belong to your organization', 404);
+        }
+        const input = property_validator_1.createFloorSchema.parse(req.body);
+        const existingFloor = (property.floors || []).find(f => f.floorNumber === input.floorNumber);
+        const existingRoom = await Room_1.Room.findOne({
+            property: property._id,
+            floorNumber: input.floorNumber,
+        });
+        if (existingFloor || existingRoom) {
+            throw new errorHandler_1.AppError(`Floor ${input.floorNumber} already exists in ${property.name}`, 409);
+        }
+        if (!property.floors) {
+            property.floors = [];
+        }
+        property.floors.push({
+            floorNumber: input.floorNumber,
+            floorLabel: input.floorLabel?.trim() || undefined,
+        });
+        await property.save();
+        res.status(201).json({
+            success: true,
+            message: `Floor ${input.floorNumber} added successfully`,
+            data: {
+                floorNumber: input.floorNumber,
+                floorLabel: input.floorLabel?.trim(),
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.createFloor = createFloor;
+const updateFloor = async (req, res, next) => {
+    try {
+        const { id: propertyId, floorNumber: floorNumberParam } = req.params;
+        const orgId = req.orgId;
+        if (!floorNumberParam) {
+            throw new errorHandler_1.AppError('Invalid floor number', 400);
+        }
+        const currentFloorNumber = parseInt(floorNumberParam, 10);
+        if (isNaN(currentFloorNumber)) {
+            throw new errorHandler_1.AppError('Invalid floor number', 400);
+        }
+        const property = await Property_1.Property.findOne({ _id: propertyId, organization: orgId });
+        if (!property) {
+            throw new errorHandler_1.AppError('Property not found or does not belong to your organization', 404);
+        }
+        const input = property_validator_1.updateFloorSchema.parse(req.body);
+        // If floorNumber changed
+        if (input.floorNumber !== undefined && input.floorNumber !== currentFloorNumber) {
+            const targetInFloors = (property.floors || []).some(f => f.floorNumber === input.floorNumber);
+            const targetInRooms = await Room_1.Room.findOne({
+                property: property._id,
+                floorNumber: input.floorNumber,
+            });
+            if (targetInFloors || targetInRooms) {
+                throw new errorHandler_1.AppError(`Floor ${input.floorNumber} already exists in this property`, 409);
+            }
+            // Check if tenants are staying on current floor
+            const roomsOnFloor = await Room_1.Room.find({
+                property: property._id,
+                floorNumber: currentFloorNumber,
+            });
+            const roomIds = roomsOnFloor.map(r => r._id);
+            const occupiedBedsCount = await Bed_1.Bed.countDocuments({
+                room: { $in: roomIds },
+                status: { $in: ['occupied', 'notice_period'] },
+            });
+            if (occupiedBedsCount > 0) {
+                throw new errorHandler_1.AppError(`Cannot change Floor number while ${occupiedBedsCount} tenant(s) are staying on this floor. Move or check them out first.`, 400);
+            }
+            // Update rooms
+            await Room_1.Room.updateMany({ property: property._id, floorNumber: currentFloorNumber }, { floorNumber: input.floorNumber });
+        }
+        const effectiveFloorNumber = input.floorNumber !== undefined ? input.floorNumber : currentFloorNumber;
+        if (input.floorLabel !== undefined) {
+            await Room_1.Room.updateMany({ property: property._id, floorNumber: effectiveFloorNumber }, { floorLabel: input.floorLabel.trim() });
+        }
+        // Update in property.floors
+        if (!property.floors)
+            property.floors = [];
+        const floorIndex = property.floors.findIndex(f => f.floorNumber === currentFloorNumber);
+        if (floorIndex >= 0 && property.floors[floorIndex]) {
+            property.floors[floorIndex].floorNumber = effectiveFloorNumber;
+            if (input.floorLabel !== undefined) {
+                property.floors[floorIndex].floorLabel = input.floorLabel.trim();
+            }
+        }
+        else {
+            property.floors.push({
+                floorNumber: effectiveFloorNumber,
+                floorLabel: input.floorLabel?.trim(),
+            });
+        }
+        await property.save();
+        res.status(200).json({
+            success: true,
+            message: 'Floor updated successfully',
+            data: {
+                floorNumber: effectiveFloorNumber,
+                floorLabel: input.floorLabel !== undefined ? input.floorLabel.trim() : undefined,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.updateFloor = updateFloor;
+const deleteFloor = async (req, res, next) => {
+    try {
+        const { id: propertyId, floorNumber: floorNumberParam } = req.params;
+        const orgId = req.orgId;
+        if (!floorNumberParam) {
+            throw new errorHandler_1.AppError('Invalid floor number', 400);
+        }
+        const floorNumber = parseInt(floorNumberParam, 10);
+        if (isNaN(floorNumber)) {
+            throw new errorHandler_1.AppError('Invalid floor number', 400);
+        }
+        const property = await Property_1.Property.findOne({ _id: propertyId, organization: orgId });
+        if (!property) {
+            throw new errorHandler_1.AppError('Property not found or does not belong to your organization', 404);
+        }
+        const roomsOnFloor = await Room_1.Room.find({ property: property._id, floorNumber });
+        const roomIds = roomsOnFloor.map(r => r._id);
+        const occupiedBedsCount = await Bed_1.Bed.countDocuments({
+            room: { $in: roomIds },
+            status: { $in: ['occupied', 'notice_period'] },
+        });
+        if (occupiedBedsCount > 0) {
+            throw new errorHandler_1.AppError(`Can't delete Floor ${floorNumber}. ${occupiedBedsCount} tenant(s) are staying on this floor. Move or check them out first, then you can delete the floor and its rooms.`, 400);
+        }
+        // Safe to delete beds and rooms on this floor
+        await Bed_1.Bed.deleteMany({ room: { $in: roomIds } });
+        await Room_1.Room.deleteMany({ property: property._id, floorNumber });
+        if (property.floors) {
+            property.floors = property.floors.filter(f => f.floorNumber !== floorNumber);
+            await property.save();
+        }
+        res.status(200).json({
+            success: true,
+            message: `Floor ${floorNumber} and its vacant rooms were deleted successfully`,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.deleteFloor = deleteFloor;

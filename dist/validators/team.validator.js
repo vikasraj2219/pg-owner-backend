@@ -30,6 +30,8 @@ exports.updateTeamMemberSchema = zod_1.z.object({
         .trim()
         .regex(/^[6-9]\d{9}$/)
         .optional(),
+    email: zod_1.z.string().trim().email('Invalid email address').toLowerCase().optional(),
+    password: zod_1.z.string().min(6, 'Password must be at least 6 characters long').optional(),
     role: zod_1.z.enum(['manager', 'staff']).optional(),
     status: zod_1.z.enum(['active', 'inactive']).optional(),
     assignedProperties: zod_1.z

@@ -129,8 +129,27 @@ const updateTeamMember = async (req, res, next) => {
         }
         if (validated.name)
             member.name = validated.name;
-        if (validated.phone)
+        if (validated.phone) {
+            if (validated.phone !== member.phone) {
+                const dupPhone = await models_1.User.findOne({ phone: validated.phone, _id: { $ne: member._id } });
+                if (dupPhone) {
+                    throw new errorHandler_1.AppError('A user with this phone number already exists', 409);
+                }
+            }
             member.phone = validated.phone;
+        }
+        if (validated.email) {
+            if (validated.email !== member.email) {
+                const dupEmail = await models_1.User.findOne({ email: validated.email, _id: { $ne: member._id } });
+                if (dupEmail) {
+                    throw new errorHandler_1.AppError('A user with this email already exists', 409);
+                }
+            }
+            member.email = validated.email;
+        }
+        if (validated.password) {
+            member.password = validated.password;
+        }
         if (validated.role)
             member.role = validated.role;
         if (validated.status)

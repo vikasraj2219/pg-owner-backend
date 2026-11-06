@@ -7,7 +7,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "node -e \"if (!require('fs').existsSync('dist/server.js')) require('child_process').execSync('tsc', {stdio:'inherit'})\"",
+    "build": "tsc",
     "build:clean": "tsc",
     "start": "node --max-old-space-size=450 dist/server.js",
     "dev": "tsx watch src/server.ts",

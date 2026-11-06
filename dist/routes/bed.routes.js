@@ -9,6 +9,7 @@ const router = (0, express_1.Router)();
 router.use(auth_1.protect);
 router.use(enforceOrgScope_1.enforceOrgScope);
 router.get('/:id', bed_controller_1.getBedById);
+router.put('/:id', bed_controller_1.updateBed);
 router.put('/:id/status', bed_controller_1.updateBedStatus);
 router.delete('/:id', bed_controller_1.deleteBed);
 exports.default = router;

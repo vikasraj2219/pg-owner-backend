@@ -381,8 +381,7 @@ const verifyRazorpayPayment = async (req, res, next) => {
         // Check if verifying a Payment Link (plink_...) or Order (order_...)
         const isPaymentLink = razorpay_order_id.startsWith('plink_');
         const isTestMode = keyId?.startsWith('rzp_test_');
-        const isTestSignature = razorpay_signature === 'test_signature_valid' ||
-            razorpay_signature === 'verified_signature';
+        const isTestSignature = razorpay_signature === 'test_signature_valid' || razorpay_signature === 'verified_signature';
         if (isPaymentLink) {
             // Payment Link verification
             let linkPaid = false;
@@ -402,7 +401,9 @@ const verifyRazorpayPayment = async (req, res, next) => {
                 }
             }
             // If live check didn't pass, allow sandbox test verification
-            if (!linkPaid && !(isTestMode && isTestSignature) && !razorpay_order_id.startsWith('plink_mock_')) {
+            if (!linkPaid &&
+                !(isTestMode && isTestSignature) &&
+                !razorpay_order_id.startsWith('plink_mock_')) {
                 throw new errorHandler_1.AppError('Razorpay payment link has not been marked as paid yet', 400);
             }
         }

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteExpense = exports.getPnLSummary = exports.getExpenses = exports.createExpense = void 0;
+exports.deleteExpense = exports.updateExpense = exports.getPnLSummary = exports.getExpenses = exports.createExpense = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const models_1 = require("../models");
@@ -160,6 +160,60 @@ const getPnLSummary = async (req, res, next) => {
     }
 };
 exports.getPnLSummary = getPnLSummary;
+/**
+ * Update an existing expense
+ * PUT /api/expenses/:id
+ */
+const updateExpense = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const orgId = req.orgId;
+        if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
+            throw new errorHandler_1.AppError('Invalid expense ID format', 400);
+        }
+        const expense = await models_1.Expense.findOne({ _id: id, organization: orgId });
+        if (!expense) {
+            throw new errorHandler_1.AppError('Expense not found or does not belong to your organization', 404);
+        }
+        const validated = expense_validator_1.updateExpenseSchema.parse(req.body);
+        if (validated.propertyId !== undefined) {
+            if (validated.propertyId) {
+                const prop = await models_1.Property.findOne({ _id: validated.propertyId, organization: orgId });
+                if (!prop) {
+                    throw new errorHandler_1.AppError('Property not found or does not belong to your organization', 404);
+                }
+                expense.property = new mongoose_1.default.Types.ObjectId(validated.propertyId);
+            }
+            else {
+                expense.property = undefined;
+            }
+        }
+        if (validated.category !== undefined)
+            expense.category = validated.category;
+        if (validated.amountPaise !== undefined)
+            expense.amountPaise = validated.amountPaise;
+        if (validated.description !== undefined)
+            expense.description = validated.description;
+        if (validated.date !== undefined)
+            expense.date = new Date(validated.date);
+        if (validated.paymentMethod !== undefined)
+            expense.paymentMethod = validated.paymentMethod;
+        if (validated.paidTo !== undefined)
+            expense.paidTo = validated.paidTo.trim() || undefined;
+        if (validated.receiptUrl !== undefined)
+            expense.receiptUrl = validated.receiptUrl;
+        await expense.save();
+        res.status(200).json({
+            success: true,
+            message: 'Expense updated successfully',
+            data: expense,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.updateExpense = updateExpense;
 /**
  * Delete single expense
  * DELETE /api/expenses/:id

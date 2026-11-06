@@ -28,15 +28,24 @@ router.use(enforceSubscription);
 
 // Protected routes
 router.use('/properties', propertyRoutes);
+router.use('/property', propertyRoutes);
 router.use('/beds', bedRoutes);
+router.use('/bed', bedRoutes);
 router.use('/checkins', checkinRoutes);
+router.use('/checkin', checkinRoutes);
 router.use('/tenants', tenantRoutes);
+router.use('/tenant', tenantRoutes);
 router.use('/invoices', invoiceRoutes);
+router.use('/invoice', invoiceRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/payment', paymentRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/checkouts', checkoutRoutes);
+router.use('/checkout', checkoutRoutes);
 router.use('/meters', meterRoutes);
+router.use('/meter', meterRoutes);
 router.use('/expenses', expenseRoutes);
+router.use('/expense', expenseRoutes);
 router.use('/team', teamRoutes);
 router.use('/uploads', uploadRoutes);
 

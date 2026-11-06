@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteBed = exports.updateBedStatus = exports.getBedById = void 0;
+exports.deleteBed = exports.updateBed = exports.updateBedStatus = exports.getBedById = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const property_validator_1 = require("../validators/property.validator");
 const Bed_1 = require("../models/Bed");
@@ -73,6 +73,61 @@ const updateBedStatus = async (req, res, next) => {
     }
 };
 exports.updateBedStatus = updateBedStatus;
+const updateBed = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const orgId = req.orgId;
+        if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
+            throw new errorHandler_1.AppError('Invalid bed ID format', 400);
+        }
+        const input = property_validator_1.updateBedSchema.parse(req.body);
+        const bed = await Bed_1.Bed.findOne({ _id: id, organization: orgId });
+        if (!bed) {
+            throw new errorHandler_1.AppError('Bed not found or does not belong to your organization', 404);
+        }
+        // Check duplicate bedNumber if updating
+        if (input.bedNumber && input.bedNumber.trim() !== bed.bedNumber) {
+            const duplicate = await Bed_1.Bed.findOne({
+                _id: { $ne: bed._id },
+                room: bed.room,
+                bedNumber: { $regex: new RegExp(`^${input.bedNumber.trim()}$`, 'i') },
+            });
+            if (duplicate) {
+                throw new errorHandler_1.AppError(`Bed label "${input.bedNumber}" already exists in this room`, 409);
+            }
+            bed.bedNumber = input.bedNumber.trim();
+        }
+        if (input.status) {
+            if (bed.status === 'occupied' && input.status === 'available' && bed.currentTenant) {
+                throw new errorHandler_1.AppError('Cannot directly set an occupied bed to available while a tenant is assigned. Please use the checkout settlement process.', 400);
+            }
+            bed.status = input.status;
+            if (input.status === 'maintenance') {
+                bed.maintenanceNote = input.maintenanceNote || 'Under maintenance';
+            }
+            else if (input.status === 'available') {
+                bed.maintenanceNote = undefined;
+                bed.noticeEndDate = undefined;
+            }
+            if (input.status === 'notice_period' && input.noticeEndDate) {
+                bed.noticeEndDate = new Date(input.noticeEndDate);
+            }
+        }
+        else if (input.maintenanceNote !== undefined && bed.status === 'maintenance') {
+            bed.maintenanceNote = input.maintenanceNote;
+        }
+        await bed.save();
+        res.status(200).json({
+            success: true,
+            message: `Bed ${bed.bedNumber} updated successfully`,
+            data: bed,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.updateBed = updateBed;
 const deleteBed = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -84,9 +139,7 @@ const deleteBed = async (req, res, next) => {
         if (!bed) {
             throw new errorHandler_1.AppError('Bed not found or does not belong to your organization', 404);
         }
-        if (bed.status === 'occupied' ||
-            bed.status === 'notice_period' ||
-            bed.currentTenant) {
+        if (bed.status === 'occupied' || bed.status === 'notice_period' || bed.currentTenant) {
             throw new errorHandler_1.AppError(`Cannot delete Bed ${bed.bedNumber} because it is currently occupied or on notice. Please check out or relocate the tenant first.`, 400);
         }
         const roomId = bed.room;

@@ -56,6 +56,11 @@ const RoomSchema = new mongoose_1.Schema({
             message: 'Floor number must be an integer',
         },
     },
+    floorLabel: {
+        type: String,
+        trim: true,
+        maxlength: [50, 'Floor label cannot exceed 50 characters'],
+    },
     roomNumber: {
         type: String,
         required: [true, 'Room number is required'],

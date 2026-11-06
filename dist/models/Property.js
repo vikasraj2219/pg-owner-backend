@@ -61,6 +61,16 @@ const PropertySchema = new mongoose_1.Schema({
         trim: true,
         maxlength: [250, 'Address cannot exceed 250 characters'],
     },
+    city: {
+        type: String,
+        trim: true,
+        maxlength: [100, 'City cannot exceed 100 characters'],
+    },
+    pincode: {
+        type: String,
+        trim: true,
+        maxlength: [20, 'Pincode cannot exceed 20 characters'],
+    },
     upiVpa: {
         type: String,
         required: [true, 'UPI VPA is required for rent collection'],
@@ -81,6 +91,23 @@ const PropertySchema = new mongoose_1.Schema({
         type: Boolean,
         default: true,
     },
+    isArchived: {
+        type: Boolean,
+        default: false,
+    },
+    floors: [
+        {
+            floorNumber: {
+                type: Number,
+                required: true,
+            },
+            floorLabel: {
+                type: String,
+                trim: true,
+                maxlength: [50, 'Floor label cannot exceed 50 characters'],
+            },
+        },
+    ],
 }, {
     timestamps: true,
     toJSON: {

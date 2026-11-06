@@ -17,6 +17,10 @@ router
     .delete((0, auth_1.requireRole)('owner'), property_controller_1.deleteProperty);
 // Visual Bed Matrix endpoint
 router.get('/:id/matrix', property_controller_1.getPropertyMatrix);
+// Floor CRUD
+router.post('/:id/floors', property_controller_1.createFloor);
+router.put('/:id/floors/:floorNumber', property_controller_1.updateFloor);
+router.delete('/:id/floors/:floorNumber', property_controller_1.deleteFloor);
 // Rooms and Bed Generation
 router.route('/:id/rooms').post(property_controller_1.createRoom).get(property_controller_1.getPropertyRooms);
 router.put('/:id/rooms/:roomId', property_controller_1.updateRoom);

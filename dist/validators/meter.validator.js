@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createMeterReadingSchema = void 0;
+exports.updateMeterReadingSchema = exports.createMeterReadingSchema = void 0;
 const zod_1 = require("zod");
 const mongoose_1 = __importDefault(require("mongoose"));
 exports.createMeterReadingSchema = zod_1.z
@@ -25,4 +25,13 @@ exports.createMeterReadingSchema = zod_1.z
     .refine(data => data.currentReading >= data.previousReading, {
     message: 'Current reading cannot be lower than previous reading',
     path: ['currentReading'],
+});
+exports.updateMeterReadingSchema = zod_1.z.object({
+    meterIdentifier: zod_1.z.string().trim().optional(),
+    previousReading: zod_1.z.number().nonnegative().optional(),
+    currentReading: zod_1.z.number().nonnegative().optional(),
+    ratePaisePerUnit: zod_1.z.number().int().nonnegative().optional(),
+    readingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    photoUrl: zod_1.z.string().trim().optional(),
+    splitMethod: zod_1.z.enum(['equal', 'by_days_occupied']).optional(),
 });
