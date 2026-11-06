@@ -27,7 +27,7 @@ const recordReading = async (req, res, next) => {
             throw new errorHandler_1.AppError('Room not found or does not belong to this property', 404);
         }
         const unitsConsumed = currentReading - previousReading;
-        const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 1200; // default ₹12/unit
+        const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 0;
         const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
         // Find all active tenants in this room
         const activeAssignments = await models_1.BedAssignment.find({
@@ -186,7 +186,7 @@ const updateReading = async (req, res, next) => {
         const effectiveRatePaise = validated.ratePaisePerUnit ??
             reading.ratePaisePerUnit ??
             property?.electricityRatePaisePerUnit ??
-            1200;
+            0;
         const splitMethod = validated.splitMethod ?? reading.splitMethod;
         const unitsConsumed = currReading - prevReading;
         const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);

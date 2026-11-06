@@ -85,7 +85,7 @@ const PropertySchema = new mongoose_1.Schema({
             validator: Number.isInteger,
             message: 'Electricity rate must be specified in whole integer paise',
         },
-        default: 1200, // ₹12.00 per unit
+        default: 0, // ₹0 per unit
     },
     isActive: {
         type: Boolean,

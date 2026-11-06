@@ -42,7 +42,7 @@ export const recordReading = async (
     }
 
     const unitsConsumed = currentReading - previousReading;
-    const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 1200; // default ₹12/unit
+    const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 0;
     const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
 
     // Find all active tenants in this room
@@ -246,7 +246,7 @@ export const updateReading = async (
       validated.ratePaisePerUnit ??
       reading.ratePaisePerUnit ??
       property?.electricityRatePaisePerUnit ??
-      1200;
+      0;
     const splitMethod = validated.splitMethod ?? reading.splitMethod;
     const unitsConsumed = currReading - prevReading;
     const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);

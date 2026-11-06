@@ -21,7 +21,7 @@ export const createPropertySchema = z.object({
     .number({ required_error: 'Electricity rate per unit is required' })
     .int('Electricity rate must be specified in integer paise')
     .nonnegative('Electricity rate cannot be negative')
-    .default(1200),
+    .default(0),
 });
 
 export const updatePropertySchema = z.object({

@@ -23,7 +23,7 @@ exports.createPropertySchema = zod_1.z.object({
         .number({ required_error: 'Electricity rate per unit is required' })
         .int('Electricity rate must be specified in integer paise')
         .nonnegative('Electricity rate cannot be negative')
-        .default(1200),
+        .default(0),
 });
 exports.updatePropertySchema = zod_1.z.object({
     name: zod_1.z.string().trim().min(1).max(100).optional(),
