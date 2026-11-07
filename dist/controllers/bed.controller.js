@@ -8,7 +8,9 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const property_validator_1 = require("../validators/property.validator");
 const Bed_1 = require("../models/Bed");
 const Room_1 = require("../models/Room");
-require("../models/Tenant");
+const Tenant_1 = require("../models/Tenant");
+const BedAssignment_1 = require("../models/BedAssignment");
+const Invoice_1 = require("../models/Invoice");
 const errorHandler_1 = require("../middleware/errorHandler");
 const getBedById = async (req, res, next) => {
     try {
@@ -96,6 +98,29 @@ const updateBed = async (req, res, next) => {
                 throw new errorHandler_1.AppError(`Bed label "${input.bedNumber}" already exists in this room`, 409);
             }
             bed.bedNumber = input.bedNumber.trim();
+        }
+        if (input.baseRentPaise !== undefined) {
+            bed.baseRentPaise = input.baseRentPaise;
+            // If the bed is occupied and rent changed, keep tenant, active assignment & unpaid invoice in sync
+            if (bed.currentTenant) {
+                await Tenant_1.Tenant.updateOne({ _id: bed.currentTenant, organization: orgId }, { monthlyRentPaise: input.baseRentPaise });
+                await BedAssignment_1.BedAssignment.updateMany({ bed: bed._id, status: 'active', organization: orgId }, { monthlyRentPaise: input.baseRentPaise });
+                // Also update any current unpaid invoice
+                const unpaidInvoice = await Invoice_1.Invoice.findOne({
+                    tenant: bed.currentTenant,
+                    organization: orgId,
+                    status: 'unpaid',
+                }).sort({ createdAt: -1 });
+                if (unpaidInvoice) {
+                    const rentItem = unpaidInvoice.items.find(it => it.category === 'rent');
+                    if (rentItem) {
+                        rentItem.amountPaise = input.baseRentPaise;
+                        unpaidInvoice.totalAmountPaise = unpaidInvoice.items.reduce((acc, it) => acc + it.amountPaise, 0);
+                        unpaidInvoice.balanceDuePaise = Math.max(0, unpaidInvoice.totalAmountPaise - unpaidInvoice.amountPaidPaise);
+                        await unpaidInvoice.save();
+                    }
+                }
+            }
         }
         if (input.status) {
             if (bed.status === 'occupied' && input.status === 'available' && bed.currentTenant) {

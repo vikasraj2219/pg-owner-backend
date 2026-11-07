@@ -3,7 +3,9 @@ import mongoose from 'mongoose';
 import { updateBedStatusSchema, updateBedSchema } from '../validators/property.validator';
 import { Bed } from '../models/Bed';
 import { Room } from '../models/Room';
-import '../models/Tenant';
+import { Tenant } from '../models/Tenant';
+import { BedAssignment } from '../models/BedAssignment';
+import { Invoice } from '../models/Invoice';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
 
@@ -122,6 +124,43 @@ export const updateBed = async (
         throw new AppError(`Bed label "${input.bedNumber}" already exists in this room`, 409);
       }
       bed.bedNumber = input.bedNumber.trim();
+    }
+
+    if (input.baseRentPaise !== undefined) {
+      bed.baseRentPaise = input.baseRentPaise;
+      // If the bed is occupied and rent changed, keep tenant, active assignment & unpaid invoice in sync
+      if (bed.currentTenant) {
+        await Tenant.updateOne(
+          { _id: bed.currentTenant, organization: orgId },
+          { monthlyRentPaise: input.baseRentPaise },
+        );
+        await BedAssignment.updateMany(
+          { bed: bed._id, status: 'active', organization: orgId },
+          { monthlyRentPaise: input.baseRentPaise },
+        );
+        // Also update any current unpaid invoice
+        const unpaidInvoice = await Invoice.findOne({
+          tenant: bed.currentTenant,
+          organization: orgId,
+          status: 'unpaid',
+        }).sort({ createdAt: -1 });
+
+        if (unpaidInvoice) {
+          const rentItem = unpaidInvoice.items.find(it => it.category === 'rent');
+          if (rentItem) {
+            rentItem.amountPaise = input.baseRentPaise;
+            unpaidInvoice.totalAmountPaise = unpaidInvoice.items.reduce(
+              (acc, it) => acc + it.amountPaise,
+              0,
+            );
+            unpaidInvoice.balanceDuePaise = Math.max(
+              0,
+              unpaidInvoice.totalAmountPaise - unpaidInvoice.amountPaidPaise,
+            );
+            await unpaidInvoice.save();
+          }
+        }
+      }
     }
 
     if (input.status) {

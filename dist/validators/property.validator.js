@@ -99,9 +99,11 @@ exports.updateFloorSchema = zod_1.z.object({
 });
 exports.addBedSchema = zod_1.z.object({
     bedNumber: zod_1.z.string().trim().min(1).max(20).optional(),
+    baseRentPaise: zod_1.z.number().int().min(0).optional(),
 });
 exports.updateBedSchema = zod_1.z.object({
     bedNumber: zod_1.z.string().trim().min(1).max(20).optional(),
+    baseRentPaise: zod_1.z.number().int().min(0).optional(),
     status: zod_1.z.enum(['available', 'occupied', 'notice_period', 'maintenance']).optional(),
     maintenanceNote: zod_1.z.string().trim().max(200).optional(),
     noticeEndDate: zod_1.z.union([zod_1.z.string().datetime(), zod_1.z.date()]).optional(),

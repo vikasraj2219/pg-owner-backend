@@ -591,6 +591,7 @@ const addBedToRoom = async (req, res, next) => {
             room: room._id,
             bedNumber,
             status: 'available',
+            baseRentPaise: input.baseRentPaise !== undefined ? input.baseRentPaise : room.baseRentPaisePerBed,
         });
         // Update room sharing type count
         const totalBedsInRoom = await Bed_1.Bed.countDocuments({ room: room._id });
@@ -661,7 +662,7 @@ const getPropertyMatrix = async (req, res, next) => {
                 currentTenant: bed.currentTenant,
                 noticeEndDate: bed.noticeEndDate,
                 maintenanceNote: bed.maintenanceNote,
-                baseRentPaise: room.baseRentPaisePerBed,
+                baseRentPaise: bed.baseRentPaise || room.baseRentPaisePerBed,
             }));
             const roomData = {
                 _id: room._id,

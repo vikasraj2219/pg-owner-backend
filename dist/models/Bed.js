@@ -69,6 +69,11 @@ const BedSchema = new mongoose_1.Schema({
         default: 'available',
         index: true,
     },
+    baseRentPaise: {
+        type: Number,
+        min: [0, 'Base rent cannot be negative'],
+        default: null,
+    },
     currentTenant: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Tenant',

@@ -103,10 +103,12 @@ export const updateFloorSchema = z.object({
 
 export const addBedSchema = z.object({
   bedNumber: z.string().trim().min(1).max(20).optional(),
+  baseRentPaise: z.number().int().min(0).optional(),
 });
 
 export const updateBedSchema = z.object({
   bedNumber: z.string().trim().min(1).max(20).optional(),
+  baseRentPaise: z.number().int().min(0).optional(),
   status: z.enum(['available', 'occupied', 'notice_period', 'maintenance']).optional(),
   maintenanceNote: z.string().trim().max(200).optional(),
   noticeEndDate: z.union([z.string().datetime(), z.date()]).optional(),

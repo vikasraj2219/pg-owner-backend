@@ -8,6 +8,7 @@ export interface IBed extends Document {
   room: mongoose.Types.ObjectId;
   bedNumber: string; // e.g. "101-A", "101-B"
   status: BedStatus;
+  baseRentPaise?: number; // Optional custom bed rate; falls back to room.baseRentPaisePerBed
   currentTenant?: mongoose.Types.ObjectId;
   noticeEndDate?: Date;
   maintenanceNote?: string;
@@ -50,6 +51,11 @@ const BedSchema = new Schema<IBed>(
       },
       default: 'available',
       index: true,
+    },
+    baseRentPaise: {
+      type: Number,
+      min: [0, 'Base rent cannot be negative'],
+      default: null,
     },
     currentTenant: {
       type: Schema.Types.ObjectId,
