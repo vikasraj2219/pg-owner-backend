@@ -5,6 +5,7 @@ export interface IOrganizationSettings {
   rentDueDay: number; // 1-28 (e.g. 1 or 5)
   gracePeriodDays: number; // e.g. 5 days
   defaultLateFeePaise: Paise; // 10000 = ₹100
+  reminderSendTime?: string; // e.g. '14:30' (2:30 PM IST)
 }
 
 export interface IOrganization extends Document {
@@ -59,6 +60,11 @@ const OrganizationSchema = new Schema<IOrganization>(
         type: Number,
         default: 10000, // 10000 = ₹100
         min: 0,
+      },
+      reminderSendTime: {
+        type: String,
+        default: '14:30', // 2:30 PM IST (changed from 9:00 AM)
+        trim: true,
       },
     },
   },

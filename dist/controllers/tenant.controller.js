@@ -354,7 +354,7 @@ const moveBed = async (req, res, next) => {
     try {
         const { id } = req.params;
         const orgId = req.orgId;
-        const { newBedId, notes } = req.body;
+        const { newBedId, notes, newMonthlyRentPaise } = req.body;
         if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
             throw new errorHandler_1.AppError('Invalid tenant ID format', 400);
         }
@@ -399,6 +399,9 @@ const moveBed = async (req, res, next) => {
         targetBed.currentTenant = tenant._id;
         await targetBed.save();
         tenant.currentBed = targetBed._id;
+        if (newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0) {
+            tenant.monthlyRentPaise = Number(newMonthlyRentPaise);
+        }
         await tenant.save();
         // 3. Create new active BedAssignment record
         await BedAssignment_1.BedAssignment.create({

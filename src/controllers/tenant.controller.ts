@@ -425,7 +425,7 @@ export const moveBed = async (
   try {
     const { id } = req.params;
     const orgId = req.orgId;
-    const { newBedId, notes } = req.body;
+    const { newBedId, notes, newMonthlyRentPaise } = req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       throw new AppError('Invalid tenant ID format', 400);
@@ -483,6 +483,9 @@ export const moveBed = async (
     await targetBed.save();
 
     tenant.currentBed = targetBed._id as mongoose.Types.ObjectId;
+    if (newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0) {
+      tenant.monthlyRentPaise = Number(newMonthlyRentPaise);
+    }
     await tenant.save();
 
     // 3. Create new active BedAssignment record

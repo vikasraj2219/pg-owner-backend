@@ -77,6 +77,11 @@ const OrganizationSchema = new mongoose_1.Schema({
             default: 10000, // 10000 = ₹100
             min: 0,
         },
+        reminderSendTime: {
+            type: String,
+            default: '14:30', // 2:30 PM IST (changed from 9:00 AM)
+            trim: true,
+        },
     },
 }, {
     timestamps: true,
