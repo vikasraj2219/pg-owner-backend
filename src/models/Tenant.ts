@@ -3,6 +3,36 @@ import mongoose, { Document, Schema, Model } from 'mongoose';
 export type TenantStatus = 'active' | 'notice_period' | 'checked_out';
 export type KycDocType = 'aadhaar' | 'pan' | 'passport' | 'voter_id';
 
+export interface IBedTransferHistoryItem {
+  fromBed?: mongoose.Types.ObjectId;
+  toBed?: mongoose.Types.ObjectId;
+  fromRoom?: mongoose.Types.ObjectId;
+  toRoom?: mongoose.Types.ObjectId;
+  fromProperty?: mongoose.Types.ObjectId;
+  toProperty?: mongoose.Types.ObjectId;
+  previousRentPaise: number;
+  newRentPaise: number;
+  effectiveDate: Date;
+  transferDate: Date;
+  effectiveType: 'immediate' | 'next_month' | 'custom';
+  proratedAdjustmentPaise?: number;
+  notes?: string;
+  status: 'completed' | 'scheduled' | 'cancelled';
+}
+
+export interface IScheduledTransfer {
+  targetBed: mongoose.Types.ObjectId;
+  targetRoom: mongoose.Types.ObjectId;
+  targetProperty: mongoose.Types.ObjectId;
+  newMonthlyRentPaise: number;
+  effectiveDate: Date;
+  effectiveType: 'immediate' | 'next_month' | 'custom';
+  proratedAdjustmentPaise?: number;
+  generateAdjustmentInvoice?: boolean;
+  notes?: string;
+  scheduledAt: Date;
+}
+
 export interface ITenant extends Document {
   organization: mongoose.Types.ObjectId;
   property: mongoose.Types.ObjectId;
@@ -21,6 +51,8 @@ export interface ITenant extends Document {
   kycDocUrl?: string;
   kycConsent: boolean;
   status: TenantStatus;
+  scheduledTransfer?: IScheduledTransfer;
+  transferHistory?: IBedTransferHistoryItem[];
   isDeleted?: boolean;
   deletedAt?: Date;
   createdAt: Date;
@@ -112,6 +144,43 @@ const TenantSchema = new Schema<ITenant>(
       default: 'active',
       index: true,
     },
+    scheduledTransfer: {
+      type: {
+        targetBed: { type: Schema.Types.ObjectId, ref: 'Bed' },
+        targetRoom: { type: Schema.Types.ObjectId, ref: 'Room' },
+        targetProperty: { type: Schema.Types.ObjectId, ref: 'Property' },
+        newMonthlyRentPaise: Number,
+        effectiveDate: Date,
+        effectiveType: { type: String, enum: ['immediate', 'next_month', 'custom'] },
+        proratedAdjustmentPaise: Number,
+        generateAdjustmentInvoice: Boolean,
+        notes: String,
+        scheduledAt: { type: Date, default: Date.now },
+      },
+      default: null,
+    },
+    transferHistory: [
+      {
+        fromBed: { type: Schema.Types.ObjectId, ref: 'Bed' },
+        toBed: { type: Schema.Types.ObjectId, ref: 'Bed' },
+        fromRoom: { type: Schema.Types.ObjectId, ref: 'Room' },
+        toRoom: { type: Schema.Types.ObjectId, ref: 'Room' },
+        fromProperty: { type: Schema.Types.ObjectId, ref: 'Property' },
+        toProperty: { type: Schema.Types.ObjectId, ref: 'Property' },
+        previousRentPaise: Number,
+        newRentPaise: Number,
+        effectiveDate: Date,
+        transferDate: { type: Date, default: Date.now },
+        effectiveType: { type: String, enum: ['immediate', 'next_month', 'custom'] },
+        proratedAdjustmentPaise: Number,
+        notes: String,
+        status: {
+          type: String,
+          enum: ['completed', 'scheduled', 'cancelled'],
+          default: 'completed',
+        },
+      },
+    ],
     isDeleted: {
       type: Boolean,
       default: false,

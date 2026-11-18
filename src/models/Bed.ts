@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
-export type BedStatus = 'available' | 'occupied' | 'notice_period' | 'maintenance';
+export type BedStatus = 'available' | 'occupied' | 'notice_period' | 'maintenance' | 'reserved';
 
 export interface IBed extends Document {
   organization: mongoose.Types.ObjectId;
@@ -45,9 +45,9 @@ const BedSchema = new Schema<IBed>(
     status: {
       type: String,
       enum: {
-        values: ['available', 'occupied', 'notice_period', 'maintenance'],
+        values: ['available', 'occupied', 'notice_period', 'maintenance', 'reserved'],
         message:
-          '{VALUE} is not a valid bed status (available, occupied, notice_period, maintenance)',
+          '{VALUE} is not a valid bed status (available, occupied, notice_period, maintenance, reserved)',
       },
       default: 'available',
       index: true,

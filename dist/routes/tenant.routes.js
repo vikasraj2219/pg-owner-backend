@@ -17,4 +17,5 @@ router.post('/:id/restore', tenant_controller_1.restoreTenant);
 router.post('/:id/vacate', tenant_controller_1.vacateTenant);
 router.post('/:id/notice', tenant_controller_1.setNoticePeriod);
 router.post('/:id/cancel-notice', tenant_controller_1.cancelNoticePeriod);
+router.post('/:id/cancel-scheduled-transfer', tenant_controller_1.cancelScheduledTransfer);
 exports.default = router;

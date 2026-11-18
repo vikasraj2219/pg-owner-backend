@@ -9,6 +9,7 @@ import {
   vacateTenant,
   setNoticePeriod,
   cancelNoticePeriod,
+  cancelScheduledTransfer,
 } from '../controllers/tenant.controller';
 import { protect } from '../middleware/auth';
 import { enforceOrgScope } from '../middleware/enforceOrgScope';
@@ -28,5 +29,6 @@ router.post('/:id/restore', restoreTenant);
 router.post('/:id/vacate', vacateTenant);
 router.post('/:id/notice', setNoticePeriod);
 router.post('/:id/cancel-notice', cancelNoticePeriod);
+router.post('/:id/cancel-scheduled-transfer', cancelScheduledTransfer);
 
 export default router;

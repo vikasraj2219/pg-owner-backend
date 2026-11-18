@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
-import { Tenant } from '../models/Tenant';
+import { Tenant, ITenant } from '../models/Tenant';
+import { calculateBedTransferProration } from '../services/proration.service';
 import { Invoice } from '../models/Invoice';
 import { DepositLedger } from '../models/DepositLedger';
 import { BedAssignment } from '../models/BedAssignment';
@@ -93,6 +94,124 @@ export const getTenants = async (
   }
 };
 
+
+export const executeScheduledTransferIfDue = async (
+  tenant: ITenant,
+  orgId: any,
+): Promise<boolean> => {
+  if (!tenant.scheduledTransfer || !tenant.scheduledTransfer.effectiveDate) {
+    return false;
+  }
+
+  const effectiveDate = new Date(tenant.scheduledTransfer.effectiveDate);
+  const now = new Date();
+  const effectiveDateStr = effectiveDate.toISOString().slice(0, 10);
+  const nowDateStr = now.toISOString().slice(0, 10);
+
+  if (effectiveDateStr > nowDateStr) {
+    return false;
+  }
+
+  const {
+    targetBed: targetBedId,
+    targetRoom,
+    targetProperty,
+    newMonthlyRentPaise,
+    notes,
+    generateAdjustmentInvoice,
+    proratedAdjustmentPaise,
+  } = tenant.scheduledTransfer;
+
+  // 1. Vacate old bed if assigned
+  if (tenant.currentBed) {
+    const oldBed = await Bed.findOne({ _id: tenant.currentBed, organization: orgId });
+    if (oldBed) {
+      oldBed.status = 'available';
+      oldBed.currentTenant = undefined;
+      oldBed.noticeEndDate = undefined;
+      oldBed.maintenanceNote = undefined;
+      await oldBed.save();
+    }
+
+    await BedAssignment.updateMany(
+      { tenant: tenant._id, bed: tenant.currentBed, status: 'active' },
+      {
+        $set: {
+          status: 'transferred',
+          endDate: effectiveDate,
+          notes: notes || 'Scheduled bed transfer executed',
+        },
+      },
+    );
+  }
+
+  // 2. Assign target bed
+  const targetBed = await Bed.findOne({ _id: targetBedId, organization: orgId });
+  if (targetBed) {
+    targetBed.status = tenant.status === 'notice_period' ? 'notice_period' : 'occupied';
+    targetBed.currentTenant = tenant._id as mongoose.Types.ObjectId;
+    await targetBed.save();
+  }
+
+  tenant.currentBed = targetBedId;
+  if (targetProperty) {
+    tenant.property = targetProperty;
+  }
+  if (newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0) {
+    tenant.monthlyRentPaise = Number(newMonthlyRentPaise);
+  }
+
+  // 3. Create active BedAssignment
+  await BedAssignment.create({
+    organization: orgId,
+    property: tenant.property,
+    room: targetRoom,
+    bed: targetBedId,
+    tenant: tenant._id,
+    monthlyRentPaise: newMonthlyRentPaise ?? tenant.monthlyRentPaise,
+    startDate: effectiveDate,
+    status: 'active',
+    notes: notes || 'Scheduled bed transfer executed',
+  });
+
+  // 4. Update status in transferHistory
+  if (tenant.transferHistory && tenant.transferHistory.length > 0) {
+    const scheduledItem = tenant.transferHistory.find(t => t.status === 'scheduled');
+    if (scheduledItem) {
+      scheduledItem.status = 'completed';
+    }
+  }
+
+  // 5. Generate adjustment invoice if requested
+  if (generateAdjustmentInvoice && proratedAdjustmentPaise && proratedAdjustmentPaise > 0) {
+    const month = effectiveDate.getMonth() + 1;
+    const year = effectiveDate.getFullYear();
+    const existingInvoice = await Invoice.findOne({
+      organization: orgId,
+      tenant: tenant._id,
+      month,
+      year,
+    });
+    if (existingInvoice && existingInvoice.status !== 'canceled') {
+      existingInvoice.items.push({
+        description: `Bed transfer rent adjustment (to Bed ${targetBed?.bedNumber || ''})`,
+        amountPaise: proratedAdjustmentPaise,
+        category: 'rent',
+      });
+      existingInvoice.totalAmountPaise += proratedAdjustmentPaise;
+      existingInvoice.balanceDuePaise += proratedAdjustmentPaise;
+      if (existingInvoice.status === 'paid') {
+        existingInvoice.status = 'partially_paid';
+      }
+      await existingInvoice.save();
+    }
+  }
+
+  tenant.scheduledTransfer = undefined;
+  await tenant.save();
+  return true;
+};
+
 export const getTenantById = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -106,7 +225,7 @@ export const getTenantById = async (
       throw new AppError('Invalid tenant ID format', 400);
     }
 
-    const tenant = await Tenant.findOne({ _id: id, organization: orgId })
+    let tenant = await Tenant.findOne({ _id: id, organization: orgId })
       .populate('property', 'name type address upiVpa electricityRatePaisePerUnit')
       .populate({
         path: 'currentBed',
@@ -115,7 +234,43 @@ export const getTenantById = async (
           path: 'room',
           select: 'roomNumber floorNumber sharingType baseRentPaisePerBed tags',
         },
-      });
+      })
+      .populate({
+        path: 'scheduledTransfer.targetBed',
+        select: 'bedNumber status room baseRentPaise',
+      })
+      .populate({
+        path: 'scheduledTransfer.targetRoom',
+        select: 'roomNumber floorNumber sharingType baseRentPaisePerBed',
+      })
+      .populate({
+        path: 'scheduledTransfer.targetProperty',
+        select: 'name',
+      })
+      .populate('transferHistory.fromBed', 'bedNumber')
+      .populate('transferHistory.toBed', 'bedNumber')
+      .populate('transferHistory.fromRoom', 'roomNumber floorNumber')
+      .populate('transferHistory.toRoom', 'roomNumber floorNumber');
+
+    if (tenant && tenant.scheduledTransfer && tenant.scheduledTransfer.effectiveDate) {
+      const executed = await executeScheduledTransferIfDue(tenant, orgId);
+      if (executed) {
+        tenant = await Tenant.findOne({ _id: id, organization: orgId })
+          .populate('property', 'name type address upiVpa electricityRatePaisePerUnit')
+          .populate({
+            path: 'currentBed',
+            select: 'bedNumber status room noticeEndDate maintenanceNote',
+            populate: {
+              path: 'room',
+              select: 'roomNumber floorNumber sharingType baseRentPaisePerBed tags',
+            },
+          })
+          .populate('transferHistory.fromBed', 'bedNumber')
+          .populate('transferHistory.toBed', 'bedNumber')
+          .populate('transferHistory.fromRoom', 'roomNumber floorNumber')
+          .populate('transferHistory.toRoom', 'roomNumber floorNumber');
+      }
+    }
 
     if (!tenant) {
       throw new AppError('Tenant not found or does not belong to your organization', 404);
@@ -425,7 +580,15 @@ export const moveBed = async (
   try {
     const { id } = req.params;
     const orgId = req.orgId;
-    const { newBedId, notes, newMonthlyRentPaise } = req.body;
+    const {
+      newBedId,
+      targetPropertyId,
+      effectiveType = 'immediate',
+      effectiveDate: customEffectiveDate,
+      newMonthlyRentPaise,
+      generateAdjustmentInvoice = false,
+      notes,
+    } = req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       throw new AppError('Invalid tenant ID format', 400);
@@ -454,6 +617,112 @@ export const moveBed = async (
       );
     }
 
+    // Determine target effective date
+    let effectiveDate: Date;
+    if (effectiveType === 'next_month') {
+      const now = new Date();
+      effectiveDate = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+    } else if (effectiveType === 'custom') {
+      if (!customEffectiveDate) {
+        throw new AppError('Effective date is required for custom date transfers', 400);
+      }
+      effectiveDate = new Date(customEffectiveDate);
+      if (isNaN(effectiveDate.getTime())) {
+        throw new AppError('Invalid custom effective date', 400);
+      }
+    } else {
+      // immediate
+      effectiveDate = new Date();
+    }
+
+    const oldRentPaise = tenant.monthlyRentPaise || 0;
+    const targetRentPaise =
+      newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0
+        ? Number(newMonthlyRentPaise)
+        : (targetBed.baseRentPaise ?? (targetBed.room as any)?.baseRentPaisePerBed ?? oldRentPaise);
+
+    const proration = calculateBedTransferProration(
+      oldRentPaise,
+      targetRentPaise,
+      effectiveDate,
+      effectiveType,
+    );
+
+    // If tenant already had a scheduled transfer, free the previously reserved bed
+    if (tenant.scheduledTransfer && tenant.scheduledTransfer.targetBed) {
+      const prevReservedBed = await Bed.findOne({
+        _id: tenant.scheduledTransfer.targetBed,
+        organization: orgId,
+      });
+      if (prevReservedBed && prevReservedBed.status === 'reserved') {
+        prevReservedBed.status = 'available';
+        prevReservedBed.currentTenant = undefined;
+        await prevReservedBed.save();
+      }
+    }
+
+    const isFutureTransfer =
+      effectiveType === 'next_month' ||
+      (effectiveType === 'custom' &&
+        effectiveDate.toISOString().slice(0, 10) > new Date().toISOString().slice(0, 10));
+
+    if (isFutureTransfer) {
+      // Reserve destination bed
+      targetBed.status = 'reserved';
+      targetBed.currentTenant = tenant._id as mongoose.Types.ObjectId;
+      await targetBed.save();
+
+      tenant.scheduledTransfer = {
+        targetBed: targetBed._id as mongoose.Types.ObjectId,
+        targetRoom: (targetBed.room as any)?._id || targetBed.room,
+        targetProperty: (targetPropertyId as any) || targetBed.property || tenant.property,
+        newMonthlyRentPaise: targetRentPaise,
+        effectiveDate,
+        effectiveType,
+        proratedAdjustmentPaise: proration.proratedAdjustmentPaise,
+        generateAdjustmentInvoice: Boolean(generateAdjustmentInvoice),
+        notes,
+        scheduledAt: new Date(),
+      };
+
+      if (!tenant.transferHistory) {
+        tenant.transferHistory = [];
+      }
+      tenant.transferHistory.push({
+        fromBed: tenant.currentBed,
+        toBed: targetBed._id as mongoose.Types.ObjectId,
+        fromRoom: tenant.currentBed ? (tenant as any).room : undefined,
+        toRoom: (targetBed.room as any)?._id || targetBed.room,
+        fromProperty: tenant.property,
+        toProperty: (targetPropertyId as any) || targetBed.property || tenant.property,
+        previousRentPaise: oldRentPaise,
+        newRentPaise: targetRentPaise,
+        effectiveDate,
+        transferDate: new Date(),
+        effectiveType,
+        proratedAdjustmentPaise: proration.proratedAdjustmentPaise,
+        notes,
+        status: 'scheduled',
+      });
+
+      await tenant.save();
+
+      res.status(200).json({
+        success: true,
+        message: `Bed transfer scheduled to Bed ${targetBed.bedNumber} starting ${effectiveDate.toLocaleDateString('en-IN')}`,
+        data: {
+          tenantId: tenant._id,
+          targetBedId: targetBed._id,
+          bedNumber: targetBed.bedNumber,
+          isScheduled: true,
+          effectiveDate,
+          proration,
+        },
+      });
+      return;
+    }
+
+    // IMMEDIATE TRANSFER:
     // 1. Vacate old bed if assigned
     if (tenant.currentBed) {
       const oldBed = await Bed.findOne({ _id: tenant.currentBed, organization: orgId });
@@ -470,7 +739,7 @@ export const moveBed = async (
         {
           $set: {
             status: 'transferred',
-            endDate: new Date(),
+            endDate: effectiveDate,
             notes: notes || 'Transferred to another bed',
           },
         },
@@ -482,23 +751,76 @@ export const moveBed = async (
     targetBed.currentTenant = tenant._id as mongoose.Types.ObjectId;
     await targetBed.save();
 
+    const previousBedId = tenant.currentBed;
     tenant.currentBed = targetBed._id as mongoose.Types.ObjectId;
-    if (newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0) {
-      tenant.monthlyRentPaise = Number(newMonthlyRentPaise);
+    if (targetPropertyId) {
+      tenant.property = targetPropertyId as any;
     }
+    tenant.monthlyRentPaise = targetRentPaise;
+
+    // 3. Record in transfer history
+    if (!tenant.transferHistory) {
+      tenant.transferHistory = [];
+    }
+    tenant.transferHistory.push({
+      fromBed: previousBedId,
+      toBed: targetBed._id as mongoose.Types.ObjectId,
+      fromRoom: undefined,
+      toRoom: (targetBed.room as any)?._id || targetBed.room,
+      fromProperty: tenant.property,
+      toProperty: (targetPropertyId as any) || targetBed.property || tenant.property,
+      previousRentPaise: oldRentPaise,
+      newRentPaise: targetRentPaise,
+      effectiveDate,
+      transferDate: new Date(),
+      effectiveType: 'immediate',
+      proratedAdjustmentPaise: proration.proratedAdjustmentPaise,
+      notes,
+      status: 'completed',
+    });
+
+    tenant.scheduledTransfer = undefined;
     await tenant.save();
 
-    // 3. Create new active BedAssignment record
+    // 4. Create new active BedAssignment record
     await BedAssignment.create({
       organization: orgId,
       property: tenant.property,
       room: (targetBed.room as any)?._id || targetBed.room,
       bed: targetBed._id,
       tenant: tenant._id,
-      startDate: new Date(),
+      monthlyRentPaise: targetRentPaise,
+      startDate: effectiveDate,
       status: 'active',
       notes: notes || 'Bed transfer',
     });
+
+    // 5. Generate adjustment invoice if requested and adjustment > 0
+    if (generateAdjustmentInvoice && proration.proratedAdjustmentPaise > 0) {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+      const existingInvoice = await Invoice.findOne({
+        organization: orgId,
+        tenant: tenant._id,
+        month: currentMonth,
+        year: currentYear,
+      });
+
+      if (existingInvoice && existingInvoice.status !== 'canceled') {
+        existingInvoice.items.push({
+          description: `Bed transfer rent adjustment (to Bed ${targetBed.bedNumber})`,
+          amountPaise: proration.proratedAdjustmentPaise,
+          category: 'rent',
+        });
+        existingInvoice.totalAmountPaise += proration.proratedAdjustmentPaise;
+        existingInvoice.balanceDuePaise += proration.proratedAdjustmentPaise;
+        if (existingInvoice.status === 'paid') {
+          existingInvoice.status = 'partially_paid';
+        }
+        await existingInvoice.save();
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -507,7 +829,68 @@ export const moveBed = async (
         tenantId: tenant._id,
         newBedId: targetBed._id,
         bedNumber: targetBed.bedNumber,
+        isScheduled: false,
+        proration,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cancel a scheduled bed transfer
+ * POST /api/tenants/:id/cancel-scheduled-transfer
+ */
+export const cancelScheduledTransfer = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid tenant ID format', 400);
+    }
+
+    const tenant = await Tenant.findOne({
+      _id: id,
+      organization: orgId,
+      isDeleted: { $ne: true },
+    });
+    if (!tenant) {
+      throw new AppError('Tenant not found', 404);
+    }
+
+    if (!tenant.scheduledTransfer) {
+      throw new AppError('Tenant does not have an active scheduled transfer', 400);
+    }
+
+    const targetBedId = tenant.scheduledTransfer.targetBed;
+    const targetBed = await Bed.findOne({ _id: targetBedId, organization: orgId });
+    if (targetBed && targetBed.status === 'reserved') {
+      targetBed.status = 'available';
+      targetBed.currentTenant = undefined;
+      await targetBed.save();
+    }
+
+    if (tenant.transferHistory && tenant.transferHistory.length > 0) {
+      const scheduledIdx = tenant.transferHistory.findIndex(t => t.status === 'scheduled');
+      if (scheduledIdx !== -1) {
+        const scheduledEntry = tenant.transferHistory[scheduledIdx];
+      if (scheduledEntry) scheduledEntry.status = 'cancelled';
+      }
+    }
+
+    tenant.scheduledTransfer = undefined;
+    await tenant.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Scheduled transfer cancelled successfully',
+      data: tenant,
     });
   } catch (error) {
     next(error);

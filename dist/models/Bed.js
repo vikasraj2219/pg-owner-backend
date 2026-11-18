@@ -63,8 +63,8 @@ const BedSchema = new mongoose_1.Schema({
     status: {
         type: String,
         enum: {
-            values: ['available', 'occupied', 'notice_period', 'maintenance'],
-            message: '{VALUE} is not a valid bed status (available, occupied, notice_period, maintenance)',
+            values: ['available', 'occupied', 'notice_period', 'maintenance', 'reserved'],
+            message: '{VALUE} is not a valid bed status (available, occupied, notice_period, maintenance, reserved)',
         },
         default: 'available',
         index: true,
