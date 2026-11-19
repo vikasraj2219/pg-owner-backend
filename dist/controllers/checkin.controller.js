@@ -96,6 +96,7 @@ const quickCheckin = async (req, res, next) => {
                     kycMaskedNumber: input.kycMaskedNumber ? input.kycMaskedNumber.trim() : undefined,
                     kycDocUrl: input.kycDocUrl ? input.kycDocUrl.trim() : undefined,
                     kycConsent: input.kycConsent,
+                    photoUrl: input.photoUrl ? input.photoUrl.trim() : undefined,
                     status: 'active',
                 },
             ], sessionOpts);

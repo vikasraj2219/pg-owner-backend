@@ -443,7 +443,7 @@ const updateTenant = async (req, res, next) => {
         if (!tenant) {
             throw new errorHandler_1.AppError('Tenant not found', 404);
         }
-        const { fullName, phone, emergencyPhone, email, monthlyRentPaise, depositPaise, kycMaskedNumber, kycDocUrl, } = req.body;
+        const { fullName, phone, emergencyPhone, email, monthlyRentPaise, depositPaise, kycMaskedNumber, kycDocUrl, photoUrl, } = req.body;
         if (fullName !== undefined)
             tenant.fullName = fullName.trim();
         if (phone !== undefined)
@@ -462,6 +462,8 @@ const updateTenant = async (req, res, next) => {
             tenant.kycMaskedNumber = kycMaskedNumber;
         if (kycDocUrl !== undefined)
             tenant.kycDocUrl = kycDocUrl;
+        if (photoUrl !== undefined)
+            tenant.photoUrl = photoUrl ? String(photoUrl).trim() : undefined;
         await tenant.save();
         res.status(200).json({
             success: true,

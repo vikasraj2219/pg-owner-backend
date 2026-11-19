@@ -796,7 +796,7 @@ export const getPropertyMatrix = async (
     const beds = await Bed.find({ property: property._id, organization: orgId })
       .populate(
         'currentTenant',
-        'fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber',
+        'fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber photoUrl',
       )
       .sort({ bedNumber: 1 });
 

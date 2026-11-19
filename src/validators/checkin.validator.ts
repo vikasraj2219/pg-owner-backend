@@ -49,6 +49,7 @@ export const quickCheckinSchema = z.object({
   kycDocType: z.enum(['aadhaar', 'pan', 'passport', 'voter_id']).optional(),
   kycMaskedNumber: z.string().trim().max(50).optional(),
   kycDocUrl: z.string().trim().url('kycDocUrl must be a valid URL').optional().or(z.literal('')),
+  photoUrl: z.string().trim().optional().or(z.literal('')),
   kycConsent: z.boolean({ required_error: 'KYC consent is required' }).refine(val => val === true, {
     message: 'KYC consent is mandatory under the DPDP Act 2023',
   }),

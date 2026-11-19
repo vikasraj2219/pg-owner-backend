@@ -50,6 +50,7 @@ export interface ITenant extends Document {
   kycMaskedNumber?: string;
   kycDocUrl?: string;
   kycConsent: boolean;
+  photoUrl?: string;
   status: TenantStatus;
   scheduledTransfer?: IScheduledTransfer;
   transferHistory?: IBedTransferHistoryItem[];
@@ -131,6 +132,10 @@ const TenantSchema = new Schema<ITenant>(
       trim: true,
     },
     kycDocUrl: {
+      type: String,
+      trim: true,
+    },
+    photoUrl: {
       type: String,
       trim: true,
     },

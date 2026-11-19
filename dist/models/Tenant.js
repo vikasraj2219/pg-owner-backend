@@ -109,6 +109,10 @@ const TenantSchema = new mongoose_1.Schema({
         type: String,
         trim: true,
     },
+    photoUrl: {
+        type: String,
+        trim: true,
+    },
     kycConsent: {
         type: Boolean,
         default: false,

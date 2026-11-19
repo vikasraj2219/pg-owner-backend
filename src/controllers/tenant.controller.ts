@@ -541,6 +541,7 @@ export const updateTenant = async (
       depositPaise,
       kycMaskedNumber,
       kycDocUrl,
+      photoUrl,
     } = req.body;
 
     if (fullName !== undefined) tenant.fullName = fullName.trim();
@@ -555,6 +556,7 @@ export const updateTenant = async (
     }
     if (kycMaskedNumber !== undefined) tenant.kycMaskedNumber = kycMaskedNumber;
     if (kycDocUrl !== undefined) tenant.kycDocUrl = kycDocUrl;
+    if (photoUrl !== undefined) tenant.photoUrl = photoUrl ? String(photoUrl).trim() : undefined;
 
     await tenant.save();
 
