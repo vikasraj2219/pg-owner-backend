@@ -9,12 +9,79 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const models_1 = require("../models");
 const meter_validator_1 = require("../validators/meter.validator");
 /**
+ * Helper to retrieve all current room occupants including both active tenants
+ * and tenants currently serving notice_period on occupied beds.
+ */
+async function getRoomOccupants(roomId, orgId) {
+    // 1. Find all occupied and notice-period beds in this room
+    const occupiedBeds = await models_1.Bed.find({
+        room: roomId,
+        organization: orgId,
+        status: { $in: ['occupied', 'notice_period'] },
+        currentTenant: { $exists: true, $ne: null },
+    });
+    // 2. Find active and notice bed assignments in this room
+    const activeAssignments = await models_1.BedAssignment.find({
+        room: roomId,
+        organization: orgId,
+        status: { $in: ['active', 'notice_period', 'notice'] },
+    });
+    // 3. Merge unique tenant IDs and retain check-in / start dates
+    const occupantMap = new Map();
+    for (const b of occupiedBeds) {
+        if (b.currentTenant) {
+            const tId = b.currentTenant.toString();
+            occupantMap.set(tId, { tenantId: b.currentTenant });
+        }
+    }
+    for (const as of activeAssignments) {
+        if (as.tenant) {
+            const tId = as.tenant.toString();
+            const existing = occupantMap.get(tId);
+            if (existing) {
+                if (!existing.startDate || (as.startDate && as.startDate < existing.startDate)) {
+                    existing.startDate = as.startDate;
+                }
+            }
+            else {
+                occupantMap.set(tId, {
+                    tenantId: as.tenant,
+                    startDate: as.startDate,
+                });
+            }
+        }
+    }
+    // 4. Verify against Tenant collection: must not be checked out or soft-deleted
+    const candidateIds = Array.from(occupantMap.values()).map(o => o.tenantId);
+    if (candidateIds.length === 0)
+        return [];
+    const validTenants = await models_1.Tenant.find({
+        _id: { $in: candidateIds },
+        organization: orgId,
+        status: { $in: ['active', 'notice_period'] },
+        isDeleted: { $ne: true },
+    });
+    const validSet = new Set(validTenants.map(t => t._id.toString()));
+    return Array.from(occupantMap.values())
+        .filter(o => validSet.has(o.tenantId.toString()))
+        .map(o => {
+        const matchingTenant = validTenants.find(t => t._id.toString() === o.tenantId.toString());
+        return {
+            tenantId: o.tenantId,
+            startDate: o.startDate || matchingTenant?.joinDate || matchingTenant?.createdAt,
+        };
+    });
+}
+/**
  * Record a sub-meter electricity reading and compute room tenant split
  * POST /api/meters/reading
  */
 const recordReading = async (req, res, next) => {
     try {
         const orgId = req.orgId;
+        if (!orgId) {
+            throw new errorHandler_1.AppError('Organization context is required', 403);
+        }
         const userId = req.user?.id;
         const validated = meter_validator_1.createMeterReadingSchema.parse(req.body);
         const { propertyId, roomId, meterIdentifier, previousReading, currentReading, ratePaisePerUnit, readingDate, photoUrl, splitMethod, } = validated;
@@ -29,22 +96,18 @@ const recordReading = async (req, res, next) => {
         const unitsConsumed = currentReading - previousReading;
         const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 0;
         const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
-        // Find all active tenants in this room
-        const activeAssignments = await models_1.BedAssignment.find({
-            room: roomId,
-            organization: orgId,
-            status: 'active',
-        });
+        // Find all active & notice occupants in this room
+        const roomOccupants = await getRoomOccupants(roomId, orgId);
         const tenantSplits = [];
-        if (activeAssignments.length > 0 && totalAmountPaise > 0) {
+        if (roomOccupants.length > 0 && totalAmountPaise > 0) {
             if (splitMethod === 'by_days_occupied') {
                 const now = new Date();
                 const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                const occupantDays = activeAssignments.map(as => {
-                    const checkin = new Date(as.startDate);
+                const occupantDays = roomOccupants.map(as => {
+                    const checkin = as.startDate ? new Date(as.startDate) : startOfMonth;
                     const effectiveStart = checkin > startOfMonth ? checkin : startOfMonth;
                     const days = Math.max(1, Math.ceil((now.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-                    return { tenant: as.tenant, days };
+                    return { tenant: as.tenantId, days };
                 });
                 const totalDays = occupantDays.reduce((sum, od) => sum + od.days, 0);
                 let allocatedPaise = 0;
@@ -63,15 +126,15 @@ const recordReading = async (req, res, next) => {
             }
             else {
                 // Equal split
-                const count = activeAssignments.length;
+                const count = roomOccupants.length;
                 const baseShare = Math.floor(totalAmountPaise / count);
                 let remainder = totalAmountPaise % count;
-                activeAssignments.forEach(as => {
+                roomOccupants.forEach(as => {
                     const share = baseShare + (remainder > 0 ? 1 : 0);
                     if (remainder > 0)
                         remainder--;
                     tenantSplits.push({
-                        tenant: as.tenant,
+                        tenant: as.tenantId,
                         daysOccupied: 30,
                         sharePaise: share,
                     });
@@ -169,6 +232,9 @@ const updateReading = async (req, res, next) => {
     try {
         const { id } = req.params;
         const orgId = req.orgId;
+        if (!orgId) {
+            throw new errorHandler_1.AppError('Organization context is required', 403);
+        }
         if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
             throw new errorHandler_1.AppError('Invalid meter reading ID format', 400);
         }
@@ -190,22 +256,18 @@ const updateReading = async (req, res, next) => {
         const splitMethod = validated.splitMethod ?? reading.splitMethod;
         const unitsConsumed = currReading - prevReading;
         const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
-        // Recalculate tenant splits
-        const activeAssignments = await models_1.BedAssignment.find({
-            room: reading.room,
-            organization: orgId,
-            status: 'active',
-        });
+        // Recalculate tenant splits across active & notice occupants
+        const roomOccupants = await getRoomOccupants(reading.room, orgId);
         const tenantSplits = [];
-        if (activeAssignments.length > 0 && totalAmountPaise > 0) {
+        if (roomOccupants.length > 0 && totalAmountPaise > 0) {
             if (splitMethod === 'by_days_occupied') {
                 const now = reading.readingDate || new Date();
                 const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                const occupantDays = activeAssignments.map(as => {
-                    const checkin = new Date(as.startDate);
+                const occupantDays = roomOccupants.map(as => {
+                    const checkin = as.startDate ? new Date(as.startDate) : startOfMonth;
                     const effectiveStart = checkin > startOfMonth ? checkin : startOfMonth;
                     const days = Math.max(1, Math.ceil((now.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-                    return { tenant: as.tenant, days };
+                    return { tenant: as.tenantId, days };
                 });
                 const totalDays = occupantDays.reduce((sum, od) => sum + od.days, 0);
                 let allocatedPaise = 0;
@@ -223,15 +285,15 @@ const updateReading = async (req, res, next) => {
                 });
             }
             else {
-                const count = activeAssignments.length;
+                const count = roomOccupants.length;
                 const baseShare = Math.floor(totalAmountPaise / count);
                 let remainder = totalAmountPaise % count;
-                activeAssignments.forEach(as => {
+                roomOccupants.forEach(as => {
                     const share = baseShare + (remainder > 0 ? 1 : 0);
                     if (remainder > 0)
                         remainder--;
                     tenantSplits.push({
-                        tenant: as.tenant,
+                        tenant: as.tenantId,
                         daysOccupied: 30,
                         sharePaise: share,
                     });
@@ -271,6 +333,9 @@ const deleteReading = async (req, res, next) => {
     try {
         const { id } = req.params;
         const orgId = req.orgId;
+        if (!orgId) {
+            throw new errorHandler_1.AppError('Organization context is required', 403);
+        }
         if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
             throw new errorHandler_1.AppError('Invalid meter reading ID format', 400);
         }

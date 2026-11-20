@@ -50,6 +50,7 @@ export const getInvoices = async (
 
     const org = await Organization.findById(orgId).select('settings');
     const gracePeriodDays = org?.settings?.gracePeriodDays ?? 5;
+    const now = new Date();
 
     const filter: Record<string, unknown> = { organization: orgId };
 
@@ -76,17 +77,9 @@ export const getInvoices = async (
     }
 
     const statusParam = req.query.status as string | undefined;
-    const now = new Date();
-    const overdueCutoff = new Date(now.getTime() - gracePeriodDays * 24 * 60 * 60 * 1000);
 
-    if (statusParam === 'overdue') {
+    if (statusParam === 'overdue' || statusParam === 'unpaid') {
       filter.status = { $in: ['unpaid', 'partially_paid'] };
-      // Due date + grace period has passed
-      filter.dueDate = { $lt: overdueCutoff };
-    } else if (statusParam === 'unpaid') {
-      filter.status = { $in: ['unpaid', 'partially_paid'] };
-      // Not yet overdue: due date is on or after the overdue cutoff
-      filter.dueDate = { $gte: overdueCutoff };
     } else if (statusParam === 'paid') {
       filter.status = 'paid';
     }

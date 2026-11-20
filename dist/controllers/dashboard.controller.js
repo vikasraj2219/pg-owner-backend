@@ -44,11 +44,12 @@ const getDashboardStats = async (req, res, next) => {
             Room_1.Room.countDocuments(bedQuery),
             Tenant_1.Tenant.find({
                 organization: orgId,
-                status: 'active',
+                status: { $in: ['active', 'notice_period'] },
                 ...(propertyIds.length > 0 ? { property: { $in: propertyIds } } : {}),
             }),
         ]);
-        const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 1000) / 10 : 0;
+        const totalOccupiedBeds = occupiedBeds + noticeBeds;
+        const occupancyRate = totalBeds > 0 ? Math.round((totalOccupiedBeds / totalBeds) * 1000) / 10 : 0;
         // Monthly financial stats (current month and year)
         const now = new Date();
         const currentMonth = now.getMonth() + 1;
@@ -98,7 +99,7 @@ const getDashboardStats = async (req, res, next) => {
                 .limit(5),
             Tenant_1.Tenant.find({
                 organization: orgId,
-                status: 'active',
+                status: { $in: ['active', 'notice_period'] },
                 ...(propertyIds.length > 0 ? { property: { $in: propertyIds } } : {}),
             })
                 .populate('currentBed', 'bedNumber')

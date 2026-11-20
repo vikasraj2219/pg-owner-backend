@@ -42,6 +42,7 @@ const getInvoices = async (req, res, next) => {
         }
         const org = await Organization_1.Organization.findById(orgId).select('settings');
         const gracePeriodDays = org?.settings?.gracePeriodDays ?? 5;
+        const now = new Date();
         const filter = { organization: orgId };
         if (req.query.propertyId) {
             if (!mongoose_1.default.Types.ObjectId.isValid(req.query.propertyId)) {
@@ -62,17 +63,8 @@ const getInvoices = async (req, res, next) => {
             filter.year = parseInt(req.query.year, 10);
         }
         const statusParam = req.query.status;
-        const now = new Date();
-        const overdueCutoff = new Date(now.getTime() - gracePeriodDays * 24 * 60 * 60 * 1000);
-        if (statusParam === 'overdue') {
+        if (statusParam === 'overdue' || statusParam === 'unpaid') {
             filter.status = { $in: ['unpaid', 'partially_paid'] };
-            // Due date + grace period has passed
-            filter.dueDate = { $lt: overdueCutoff };
-        }
-        else if (statusParam === 'unpaid') {
-            filter.status = { $in: ['unpaid', 'partially_paid'] };
-            // Not yet overdue: due date is on or after the overdue cutoff
-            filter.dueDate = { $gte: overdueCutoff };
         }
         else if (statusParam === 'paid') {
             filter.status = 'paid';
