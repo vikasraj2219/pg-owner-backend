@@ -19,6 +19,9 @@ exports.createMeterReadingSchema = zod_1.z
     currentReading: zod_1.z.number().nonnegative(),
     ratePaisePerUnit: zod_1.z.number().int().nonnegative().optional(),
     readingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    previousReadingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    currentReadingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    billingMode: zod_1.z.enum(['next_rent_invoice', 'separate_invoice']).default('next_rent_invoice'),
     photoUrl: zod_1.z.string().trim().optional(),
     splitMethod: zod_1.z.enum(['equal', 'by_days_occupied']).default('equal'),
 })
@@ -32,6 +35,9 @@ exports.updateMeterReadingSchema = zod_1.z.object({
     currentReading: zod_1.z.number().nonnegative().optional(),
     ratePaisePerUnit: zod_1.z.number().int().nonnegative().optional(),
     readingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    previousReadingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    currentReadingDate: zod_1.z.string().or(zod_1.z.date()).optional(),
+    billingMode: zod_1.z.enum(['next_rent_invoice', 'separate_invoice']).optional(),
     photoUrl: zod_1.z.string().trim().optional(),
     splitMethod: zod_1.z.enum(['equal', 'by_days_occupied']).optional(),
 });

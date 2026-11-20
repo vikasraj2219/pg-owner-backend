@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import { Tenant, Bed, BedAssignment, Invoice, DepositLedger, SettlementStatement } from '../models';
+import { Tenant, Bed, BedAssignment, Invoice, DepositLedger, SettlementStatement, MeterReading } from '../models';
 import { checkoutConfirmSchema } from '../validators/checkout.validator';
 import { generateSettlementNumber } from '../services/settlementNumber.service';
 
@@ -53,7 +53,47 @@ export const getCheckoutPreview = async (
 
     const unpaidDuesPaise = unpaidInvoices.reduce((sum, inv) => sum + inv.balanceDuePaise, 0);
     const depositPaidPaise = tenant.depositPaidPaise || tenant.depositPaise || 0;
-    const netRefundPaise = Math.max(0, depositPaidPaise - unpaidDuesPaise);
+
+    // Query unbilled Mode A electricity allocations for this tenant
+    const pendingMeterReadings = await MeterReading.find({
+      organization: orgId,
+      'tenantSplits.tenant': tenant._id,
+      'tenantSplits.status': 'pending_billing',
+    });
+
+    let unbilledElectricityPaise = 0;
+    const pendingElectricityBreakdown: Array<{
+      readingId: string;
+      meterIdentifier: string;
+      period: string;
+      sharePaise: number;
+    }> = [];
+
+    for (const mr of pendingMeterReadings) {
+      for (const sp of mr.tenantSplits) {
+        if (
+          sp.tenant.toString() === tenant._id.toString() &&
+          sp.status === 'pending_billing' &&
+          sp.sharePaise > 0
+        ) {
+          unbilledElectricityPaise += sp.sharePaise;
+          const wStart = mr.previousReadingDate || mr.readingDate;
+          const wEnd = mr.currentReadingDate || mr.readingDate;
+          const periodText = `${new Date(wStart).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - ${new Date(wEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+          pendingElectricityBreakdown.push({
+            readingId: mr._id.toString(),
+            meterIdentifier: mr.meterIdentifier || 'Sub-meter',
+            period: periodText,
+            sharePaise: sp.sharePaise,
+          });
+        }
+      }
+    }
+
+    const netRefundPaise = Math.max(
+      0,
+      depositPaidPaise - (unpaidDuesPaise + unbilledElectricityPaise),
+    );
 
     res.status(200).json({
       success: true,
@@ -81,6 +121,8 @@ export const getCheckoutPreview = async (
           status: inv.status,
         })),
         unpaidDuesPaise,
+        unbilledElectricityPaise,
+        pendingElectricityBreakdown,
         estimatedRefundPaise: netRefundPaise,
       },
     });
@@ -139,8 +181,36 @@ export const confirmCheckout = async (
     const unpaidDuesPaise = unpaidInvoices.reduce((sum, inv) => sum + inv.balanceDuePaise, 0);
     const depositPaidPaise = tenant.depositPaidPaise || tenant.depositPaise || 0;
 
+    // Query & settle any unbilled Mode A electricity allocations for this tenant
+    const pendingMeterReadings = await MeterReading.find({
+      organization: orgId,
+      'tenantSplits.tenant': tenant._id,
+      'tenantSplits.status': 'pending_billing',
+    }).session(session);
+
+    let unbilledEbPaise = 0;
+    for (const mr of pendingMeterReadings) {
+      let modified = false;
+      for (const sp of mr.tenantSplits) {
+        if (sp.tenant.toString() === tenant._id.toString() && sp.status === 'pending_billing') {
+          unbilledEbPaise += sp.sharePaise;
+          sp.status = 'settled_at_checkout';
+          modified = true;
+        }
+      }
+      if (modified) {
+        await mr.save({ session });
+      }
+    }
+
+    const effectiveElectricityDeductionsPaise =
+      electricityDeductionsPaise > 0 ? electricityDeductionsPaise : unbilledEbPaise;
+
     const totalDeductionsPaise =
-      unpaidDuesPaise + damageDeductionsPaise + electricityDeductionsPaise + otherDeductionsPaise;
+      unpaidDuesPaise +
+      damageDeductionsPaise +
+      effectiveElectricityDeductionsPaise +
+      otherDeductionsPaise;
 
     const calculatedRefundPaise = Math.max(0, depositPaidPaise - totalDeductionsPaise);
     const netRefundPaise =
@@ -190,7 +260,7 @@ export const confirmCheckout = async (
           depositPaidPaise,
           unpaidDuesPaise,
           damageDeductionsPaise,
-          electricityDeductionsPaise,
+          electricityDeductionsPaise: effectiveElectricityDeductionsPaise,
           otherDeductionsPaise,
           totalDeductionsPaise,
           netRefundPaise,
@@ -224,7 +294,7 @@ export const confirmCheckout = async (
     }
 
     const totalNonDuesDeduction =
-      damageDeductionsPaise + electricityDeductionsPaise + otherDeductionsPaise;
+      damageDeductionsPaise + effectiveElectricityDeductionsPaise + otherDeductionsPaise;
     if (totalNonDuesDeduction > 0) {
       await DepositLedger.create(
         [
@@ -235,7 +305,7 @@ export const confirmCheckout = async (
             amountPaise: totalNonDuesDeduction,
             type: 'deducted',
             paymentMethod,
-            notes: `Checkout deductions [${settlementNumber}] (Damage: ${damageDeductionsPaise}, EB: ${electricityDeductionsPaise}, Other: ${otherDeductionsPaise})`,
+            notes: `Checkout deductions [${settlementNumber}] (Damage: ${damageDeductionsPaise}, EB: ${effectiveElectricityDeductionsPaise}, Other: ${otherDeductionsPaise})`,
             recordedBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
             date: new Date(),
           },

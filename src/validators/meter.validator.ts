@@ -14,6 +14,9 @@ export const createMeterReadingSchema = z
     currentReading: z.number().nonnegative(),
     ratePaisePerUnit: z.number().int().nonnegative().optional(),
     readingDate: z.string().or(z.date()).optional(),
+    previousReadingDate: z.string().or(z.date()).optional(),
+    currentReadingDate: z.string().or(z.date()).optional(),
+    billingMode: z.enum(['next_rent_invoice', 'separate_invoice']).default('next_rent_invoice'),
     photoUrl: z.string().trim().optional(),
     splitMethod: z.enum(['equal', 'by_days_occupied']).default('equal'),
   })
@@ -28,6 +31,9 @@ export const updateMeterReadingSchema = z.object({
   currentReading: z.number().nonnegative().optional(),
   ratePaisePerUnit: z.number().int().nonnegative().optional(),
   readingDate: z.string().or(z.date()).optional(),
+  previousReadingDate: z.string().or(z.date()).optional(),
+  currentReadingDate: z.string().or(z.date()).optional(),
+  billingMode: z.enum(['next_rent_invoice', 'separate_invoice']).optional(),
   photoUrl: z.string().trim().optional(),
   splitMethod: z.enum(['equal', 'by_days_occupied']).optional(),
 });

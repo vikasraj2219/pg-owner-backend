@@ -5,6 +5,7 @@ import { Payment } from '../models/Payment';
 import { Organization } from '../models/Organization';
 import { Tenant } from '../models/Tenant';
 import { BedAssignment } from '../models/BedAssignment';
+import { MeterReading } from '../models/MeterReading';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
 import { generateInvoiceNumber } from '../services/invoiceNumber.service';
@@ -271,29 +272,78 @@ export const generateMonthlyInvoices = async (
 
         const rentPaise = assignment.monthlyRentPaise;
 
+        // Check for unbilled Mode A electricity allocations for this tenant
+        const pendingMeterReadings = await MeterReading.find({
+          organization: targetId,
+          'tenantSplits.tenant': tenantId,
+          'tenantSplits.status': 'pending_billing',
+        });
+
+        const invoiceItems: Array<{
+          description: string;
+          amountPaise: number;
+          category: 'rent' | 'electricity' | 'mess' | 'late_fee' | 'damage';
+        }> = [
+          {
+            description: cycle.description,
+            amountPaise: rentPaise,
+            category: 'rent',
+          },
+        ];
+
+        let totalInvoicePaise = rentPaise;
+        const splitsToUpdate: Array<{ reading: any; split: any }> = [];
+
+        for (const mr of pendingMeterReadings) {
+          for (const sp of mr.tenantSplits) {
+            if (
+              sp.tenant.toString() === tenantId.toString() &&
+              sp.status === 'pending_billing' &&
+              sp.sharePaise > 0
+            ) {
+              const windowStart = mr.previousReadingDate || mr.readingDate;
+              const windowEnd = mr.currentReadingDate || mr.readingDate;
+              const periodText = `${new Date(windowStart).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - ${new Date(windowEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+              const itemTag = `[MTR:${mr._id.toString()}]`;
+              const ebDesc = `Electricity: ${mr.meterIdentifier || 'Sub-meter'} (${mr.unitsConsumed}u @ ₹${(mr.ratePaisePerUnit / 100).toFixed(1)}/u: ${periodText}) ${itemTag}`;
+
+              invoiceItems.push({
+                description: ebDesc,
+                amountPaise: sp.sharePaise,
+                category: 'electricity',
+              });
+              totalInvoicePaise += sp.sharePaise;
+              splitsToUpdate.push({ reading: mr, split: sp });
+            }
+          }
+        }
+
         try {
-          await Invoice.create({
+          const newInvoice = await Invoice.create({
             organization: targetId,
             property: assignment.property,
             tenant: tenantId,
             invoiceNumber,
+            invoiceType: 'rent',
             month: targetMonth,
             year: targetYear,
             dueDate: cycle.periodStart, // Due on tenant's join date anniversary
             periodStart: cycle.periodStart,
             periodEnd: cycle.periodEnd,
-            items: [
-              {
-                description: cycle.description,
-                amountPaise: rentPaise,
-                category: 'rent',
-              },
-            ],
-            totalAmountPaise: rentPaise,
+            items: invoiceItems,
+            totalAmountPaise: totalInvoicePaise,
             amountPaidPaise: 0,
-            balanceDuePaise: rentPaise,
+            balanceDuePaise: totalInvoicePaise,
             status: 'unpaid',
           });
+
+          // Mark pending splits as invoiced and link to the new invoice
+          for (const item of splitsToUpdate) {
+            item.split.status = 'invoiced';
+            item.split.invoice = newInvoice._id;
+            await item.reading.save();
+          }
+
           generatedCount++;
         } catch (err: unknown) {
           // Handle potential race condition on unique index { tenant: 1, month: 1, year: 1 }

@@ -10,6 +10,7 @@ const Payment_1 = require("../models/Payment");
 const Organization_1 = require("../models/Organization");
 const Tenant_1 = require("../models/Tenant");
 const BedAssignment_1 = require("../models/BedAssignment");
+const MeterReading_1 = require("../models/MeterReading");
 const errorHandler_1 = require("../middleware/errorHandler");
 const invoiceNumber_service_1 = require("../services/invoiceNumber.service");
 const receiptNumber_service_1 = require("../services/receiptNumber.service");
@@ -211,29 +212,65 @@ const generateMonthlyInvoices = async (req, res, next) => {
                 const cycle = (0, proration_service_1.calculateJoinDateCycle)(new Date(tenantJoinDate), targetMonth, targetYear);
                 const invoiceNumber = await (0, invoiceNumber_service_1.generateInvoiceNumber)(targetId.toString(), targetYear, targetMonth);
                 const rentPaise = assignment.monthlyRentPaise;
+                // Check for unbilled Mode A electricity allocations for this tenant
+                const pendingMeterReadings = await MeterReading_1.MeterReading.find({
+                    organization: targetId,
+                    'tenantSplits.tenant': tenantId,
+                    'tenantSplits.status': 'pending_billing',
+                });
+                const invoiceItems = [
+                    {
+                        description: cycle.description,
+                        amountPaise: rentPaise,
+                        category: 'rent',
+                    },
+                ];
+                let totalInvoicePaise = rentPaise;
+                const splitsToUpdate = [];
+                for (const mr of pendingMeterReadings) {
+                    for (const sp of mr.tenantSplits) {
+                        if (sp.tenant.toString() === tenantId.toString() &&
+                            sp.status === 'pending_billing' &&
+                            sp.sharePaise > 0) {
+                            const windowStart = mr.previousReadingDate || mr.readingDate;
+                            const windowEnd = mr.currentReadingDate || mr.readingDate;
+                            const periodText = `${new Date(windowStart).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - ${new Date(windowEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+                            const itemTag = `[MTR:${mr._id.toString()}]`;
+                            const ebDesc = `Electricity: ${mr.meterIdentifier || 'Sub-meter'} (${mr.unitsConsumed}u @ ₹${(mr.ratePaisePerUnit / 100).toFixed(1)}/u: ${periodText}) ${itemTag}`;
+                            invoiceItems.push({
+                                description: ebDesc,
+                                amountPaise: sp.sharePaise,
+                                category: 'electricity',
+                            });
+                            totalInvoicePaise += sp.sharePaise;
+                            splitsToUpdate.push({ reading: mr, split: sp });
+                        }
+                    }
+                }
                 try {
-                    await Invoice_1.Invoice.create({
+                    const newInvoice = await Invoice_1.Invoice.create({
                         organization: targetId,
                         property: assignment.property,
                         tenant: tenantId,
                         invoiceNumber,
+                        invoiceType: 'rent',
                         month: targetMonth,
                         year: targetYear,
                         dueDate: cycle.periodStart, // Due on tenant's join date anniversary
                         periodStart: cycle.periodStart,
                         periodEnd: cycle.periodEnd,
-                        items: [
-                            {
-                                description: cycle.description,
-                                amountPaise: rentPaise,
-                                category: 'rent',
-                            },
-                        ],
-                        totalAmountPaise: rentPaise,
+                        items: invoiceItems,
+                        totalAmountPaise: totalInvoicePaise,
                         amountPaidPaise: 0,
-                        balanceDuePaise: rentPaise,
+                        balanceDuePaise: totalInvoicePaise,
                         status: 'unpaid',
                     });
+                    // Mark pending splits as invoiced and link to the new invoice
+                    for (const item of splitsToUpdate) {
+                        item.split.status = 'invoiced';
+                        item.split.invoice = newInvoice._id;
+                        await item.reading.save();
+                    }
                     generatedCount++;
                 }
                 catch (err) {

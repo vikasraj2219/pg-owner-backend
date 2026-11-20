@@ -2,124 +2,150 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import { MeterReading, Room, Property, BedAssignment, Bed, Tenant, Invoice } from '../models';
+import { MeterReading, Room, Property, BedAssignment, Bed, Invoice } from '../models';
 import { generateInvoiceNumber } from '../services/invoiceNumber.service';
 import { createMeterReadingSchema, updateMeterReadingSchema } from '../validators/meter.validator';
 
 /**
- * Helper to retrieve all current room occupants including both active tenants
- * and tenants currently serving notice_period on occupied beds.
+ * Helper to calculate occupancy days for each tenant in a room during a reading window.
+ * Uses BedAssignment history to account for mid-period check-ins, checkouts, and room transfers.
  */
-async function getRoomOccupants(
+async function getRoomOccupancyForWindow(
   roomId: string | mongoose.Types.ObjectId,
   orgId: string | mongoose.Types.ObjectId,
-): Promise<Array<{ tenantId: mongoose.Types.ObjectId; startDate?: Date }>> {
-  // 1. Find all occupied and notice-period beds in this room
+  periodStart: Date,
+  periodEnd: Date,
+): Promise<Array<{ tenantId: mongoose.Types.ObjectId; days: number; tenantName?: string }>> {
+  const windowStartTime = periodStart.getTime();
+  const windowEndTime = periodEnd.getTime();
+
+  // 1. Find all BedAssignment records for this room overlapping with the reading window
+  const assignments = await BedAssignment.find({
+    room: roomId,
+    organization: orgId,
+    startDate: { $lte: periodEnd },
+    $or: [
+      { endDate: { $exists: false } },
+      { endDate: null },
+      { endDate: { $gte: periodStart } },
+    ],
+  }).populate('tenant', 'fullName status isDeleted');
+
+  // 2. Also check current Bed occupants in this room as fallback/supplement
   const occupiedBeds = await Bed.find({
     room: roomId,
     organization: orgId,
     status: { $in: ['occupied', 'notice_period'] },
     currentTenant: { $exists: true, $ne: null },
-  });
+  }).populate('currentTenant', 'fullName status isDeleted joinDate createdAt');
 
-  // 2. Find active and notice bed assignments in this room
-  const activeAssignments = await BedAssignment.find({
-    room: roomId,
-    organization: orgId,
-    status: { $in: ['active', 'notice_period', 'notice'] },
-  });
+  const tenantDaysMap = new Map<
+    string,
+    { tenantId: mongoose.Types.ObjectId; days: number; tenantName?: string }
+  >();
 
-  // 3. Merge unique tenant IDs and retain check-in / start dates
-  const occupantMap = new Map<string, { tenantId: mongoose.Types.ObjectId; startDate?: Date }>();
+  // Process historical and active assignments
+  for (const as of assignments) {
+    if (!as.tenant) continue;
+    const t = as.tenant as any;
+    if (t.isDeleted) continue;
 
-  for (const b of occupiedBeds) {
-    if (b.currentTenant) {
-      const tId = b.currentTenant.toString();
-      occupantMap.set(tId, { tenantId: b.currentTenant as mongoose.Types.ObjectId });
-    }
-  }
+    const tId = t._id.toString();
+    const asStart = as.startDate ? as.startDate.getTime() : windowStartTime;
+    const asEnd = as.endDate ? as.endDate.getTime() : windowEndTime;
 
-  for (const as of activeAssignments) {
-    if (as.tenant) {
-      const tId = as.tenant.toString();
-      const existing = occupantMap.get(tId);
+    const overlapStart = Math.max(asStart, windowStartTime);
+    const overlapEnd = Math.min(asEnd, windowEndTime);
+
+    if (overlapEnd >= overlapStart) {
+      const days = Math.max(1, Math.round((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1);
+      const existing = tenantDaysMap.get(tId);
       if (existing) {
-        if (!existing.startDate || (as.startDate && as.startDate < existing.startDate)) {
-          existing.startDate = as.startDate;
-        }
+        existing.days += days;
       } else {
-        occupantMap.set(tId, {
-          tenantId: as.tenant as mongoose.Types.ObjectId,
-          startDate: as.startDate,
+        tenantDaysMap.set(tId, {
+          tenantId: t._id,
+          days,
+          tenantName: t.fullName,
         });
       }
     }
   }
 
-  // 4. Verify against Tenant collection: must not be checked out or soft-deleted
-  const candidateIds = Array.from(occupantMap.values()).map(o => o.tenantId);
-  if (candidateIds.length === 0) return [];
+  // Fallback for current beds if no assignment was recorded
+  for (const b of occupiedBeds) {
+    if (!b.currentTenant) continue;
+    const t = b.currentTenant as any;
+    if (t.isDeleted) continue;
 
-  const validTenants = await Tenant.find({
-    _id: { $in: candidateIds },
-    organization: orgId,
-    status: { $in: ['active', 'notice_period'] },
-    isDeleted: { $ne: true },
-  });
+    const tId = t._id.toString();
+    if (!tenantDaysMap.has(tId)) {
+      const joinTime =
+        t.joinDate || t.createdAt ? new Date(t.joinDate || t.createdAt).getTime() : windowStartTime;
+      const overlapStart = Math.max(joinTime, windowStartTime);
+      const overlapEnd = windowEndTime;
 
-  const validSet = new Set(validTenants.map(t => t._id.toString()));
-  return Array.from(occupantMap.values())
-    .filter(o => validSet.has(o.tenantId.toString()))
-    .map(o => {
-      const matchingTenant = validTenants.find(t => t._id.toString() === o.tenantId.toString());
-      return {
-        tenantId: o.tenantId,
-        startDate: o.startDate || matchingTenant?.joinDate || (matchingTenant as any)?.createdAt,
-      };
-    });
+      if (overlapEnd >= overlapStart) {
+        const days = Math.max(1, Math.round((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1);
+        tenantDaysMap.set(tId, {
+          tenantId: t._id,
+          days,
+          tenantName: t.fullName,
+        });
+      }
+    }
+  }
+
+  return Array.from(tenantDaysMap.values());
 }
 
 /**
  * Synchronize tenant meter splits with the Invoice collection.
- * Creates or updates an electricity line item for each tenant split in the corresponding billing cycle.
+ * Supports Mode A (Add to Next Rent Invoice) and Mode B (Separate Utility Invoice).
  */
 async function syncMeterReadingToInvoices(
   reading: any,
   orgId: mongoose.Types.ObjectId | string,
 ): Promise<void> {
-  const readingDate = reading.readingDate ? new Date(reading.readingDate) : new Date();
+  const windowStart = reading.previousReadingDate || reading.readingDate || new Date();
+  const windowEnd = reading.currentReadingDate || reading.readingDate || new Date();
+  const readingDate = new Date(windowEnd);
   const invMonth = readingDate.getMonth() + 1;
   const invYear = readingDate.getFullYear();
 
   const identifier = reading.meterIdentifier || 'Sub-meter';
   const itemTag = `[MTR:${reading._id.toString()}]`;
-  const ebDesc = `Electricity: ${identifier} (${reading.unitsConsumed}u @ ₹${(reading.ratePaisePerUnit / 100).toFixed(1)}/u) ${itemTag}`;
+  const periodText = `${new Date(windowStart).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - ${new Date(windowEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+  const ebDesc = `Electricity: ${identifier} (${reading.unitsConsumed}u @ ₹${(reading.ratePaisePerUnit / 100).toFixed(1)}/u: ${periodText}) ${itemTag}`;
 
   for (const split of reading.tenantSplits || []) {
     if (!split.tenant) continue;
     const tenantId = split.tenant._id || split.tenant;
 
-    let invoice = await Invoice.findOne({
-      organization: orgId,
-      tenant: tenantId,
-      month: invMonth,
-      year: invYear,
-    });
+    if (split.sharePaise <= 0) {
+      split.status = 'invoiced';
+      continue;
+    }
 
-    if (split.sharePaise > 0) {
+    if (reading.billingMode === 'separate_invoice') {
+      // MODE B: Generate a separate standalone electricity invoice due in 5 days
+      let invoice = await Invoice.findOne({
+        organization: orgId,
+        tenant: tenantId,
+        invoiceType: 'electricity',
+        month: invMonth,
+        year: invYear,
+      });
+
       if (invoice) {
-        // Find if this reading's electricity line item is already present
         const existingIdx = invoice.items.findIndex(
           it =>
             it.category === 'electricity' &&
-            (it.description.includes(itemTag) ||
-              it.description.includes(`Electricity: ${identifier}`)),
+            (it.description.includes(itemTag) || it.description.includes(`Electricity: ${identifier}`)),
         );
-
-        const existingItem = existingIdx >= 0 ? invoice.items[existingIdx] : undefined;
-        if (existingItem) {
-          existingItem.description = ebDesc;
-          existingItem.amountPaise = split.sharePaise;
+        if (existingIdx >= 0 && invoice.items[existingIdx]) {
+          invoice.items[existingIdx].description = ebDesc;
+          invoice.items[existingIdx].amountPaise = split.sharePaise;
         } else {
           invoice.items.push({
             description: ebDesc,
@@ -127,7 +153,6 @@ async function syncMeterReadingToInvoices(
             category: 'electricity',
           });
         }
-
         const newTotal = invoice.items.reduce((sum, it) => sum + it.amountPaise, 0);
         invoice.totalAmountPaise = newTotal;
         invoice.balanceDuePaise = Math.max(0, newTotal - invoice.amountPaidPaise);
@@ -138,20 +163,23 @@ async function syncMeterReadingToInvoices(
         } else {
           invoice.status = 'unpaid';
         }
-
         await invoice.save();
         split.invoice = invoice._id;
+        split.status = 'invoiced';
       } else {
-        // Generate a new invoice for this tenant for electricity
         const invNum = await generateInvoiceNumber(orgId.toString(), invYear, invMonth);
+        const dueDate = new Date(readingDate.getTime() + 5 * 24 * 60 * 60 * 1000); // 5-day grace period
         const newInvoice = await Invoice.create({
           organization: orgId,
           property: reading.property,
           tenant: tenantId,
           invoiceNumber: invNum,
+          invoiceType: 'electricity',
           month: invMonth,
           year: invYear,
-          dueDate: readingDate,
+          dueDate,
+          periodStart: windowStart,
+          periodEnd: windowEnd,
           items: [
             {
               description: ebDesc,
@@ -165,33 +193,55 @@ async function syncMeterReadingToInvoices(
           status: 'unpaid',
         });
         split.invoice = newInvoice._id;
+        split.status = 'invoiced';
       }
-    } else if (invoice) {
-      // 0 split amount -> remove this reading's line item if previously added
-      const existingIdx = invoice.items.findIndex(
-        it =>
-          it.category === 'electricity' &&
-          (it.description.includes(itemTag) ||
-            it.description.includes(`Electricity: ${identifier}`)),
-      );
-      if (existingIdx >= 0) {
-        invoice.items.splice(existingIdx, 1);
-        if (invoice.items.length === 0 && invoice.amountPaidPaise === 0) {
-          await Invoice.deleteOne({ _id: invoice._id, organization: orgId });
-          split.invoice = undefined;
+    } else {
+      // MODE A: Add to Next Rent Invoice (Default Recommended)
+      // Check if the tenant currently has an UNPAID rent invoice for the current month
+      const activeUnpaidRentInvoice = await Invoice.findOne({
+        organization: orgId,
+        tenant: tenantId,
+        invoiceType: 'rent',
+        status: { $in: ['unpaid', 'partially_paid'] },
+      }).sort({ dueDate: -1 });
+
+      if (activeUnpaidRentInvoice) {
+        // Rent invoice is pending/unpaid -> attach electricity line item directly
+        const existingIdx = activeUnpaidRentInvoice.items.findIndex(
+          it =>
+            it.category === 'electricity' &&
+            (it.description.includes(itemTag) || it.description.includes(`Electricity: ${identifier}`)),
+        );
+        if (existingIdx >= 0 && activeUnpaidRentInvoice.items[existingIdx]) {
+          activeUnpaidRentInvoice.items[existingIdx].description = ebDesc;
+          activeUnpaidRentInvoice.items[existingIdx].amountPaise = split.sharePaise;
         } else {
-          const newTotal = invoice.items.reduce((sum, it) => sum + it.amountPaise, 0);
-          invoice.totalAmountPaise = newTotal;
-          invoice.balanceDuePaise = Math.max(0, newTotal - invoice.amountPaidPaise);
-          if (invoice.balanceDuePaise === 0 && invoice.totalAmountPaise > 0) {
-            invoice.status = 'paid';
-          } else if (invoice.amountPaidPaise > 0) {
-            invoice.status = 'partially_paid';
-          } else {
-            invoice.status = 'unpaid';
-          }
-          await invoice.save();
+          activeUnpaidRentInvoice.items.push({
+            description: ebDesc,
+            amountPaise: split.sharePaise,
+            category: 'electricity',
+          });
         }
+        const newTotal = activeUnpaidRentInvoice.items.reduce((sum, it) => sum + it.amountPaise, 0);
+        activeUnpaidRentInvoice.totalAmountPaise = newTotal;
+        activeUnpaidRentInvoice.balanceDuePaise = Math.max(
+          0,
+          newTotal - activeUnpaidRentInvoice.amountPaidPaise,
+        );
+        if (activeUnpaidRentInvoice.balanceDuePaise === 0 && activeUnpaidRentInvoice.totalAmountPaise > 0) {
+          activeUnpaidRentInvoice.status = 'paid';
+        } else if (activeUnpaidRentInvoice.amountPaidPaise > 0) {
+          activeUnpaidRentInvoice.status = 'partially_paid';
+        } else {
+          activeUnpaidRentInvoice.status = 'unpaid';
+        }
+        await activeUnpaidRentInvoice.save();
+        split.invoice = activeUnpaidRentInvoice._id;
+        split.status = 'invoiced';
+      } else {
+        // No unpaid rent invoice currently open (rent was already paid, or next cycle not yet reached)
+        // Keep in pending_billing state so it attaches cleanly to the upcoming rent invoice on join anniversary
+        split.status = 'pending_billing';
       }
     }
   }
@@ -276,8 +326,11 @@ export const recordReading = async (
       currentReading,
       ratePaisePerUnit,
       readingDate,
+      previousReadingDate,
+      currentReadingDate,
+      billingMode = 'next_rent_invoice',
       photoUrl,
-      splitMethod,
+      splitMethod = 'by_days_occupied',
     } = validated;
 
     const property = await Property.findOne({ _id: propertyId, organization: orgId });
@@ -294,60 +347,66 @@ export const recordReading = async (
     const effectiveRatePaise = ratePaisePerUnit ?? property.electricityRatePaisePerUnit ?? 0;
     const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
 
-    // Find all active & notice occupants in this room
-    const roomOccupants = await getRoomOccupants(roomId, orgId);
+    // Reading window
+    const windowEnd = currentReadingDate
+      ? new Date(currentReadingDate)
+      : readingDate
+        ? new Date(readingDate)
+        : new Date();
+    const windowStart = previousReadingDate
+      ? new Date(previousReadingDate)
+      : new Date(windowEnd.getFullYear(), windowEnd.getMonth(), 1);
+
+    // Find all active, notice, and historical occupants in this room during the window
+    const occupantDays = await getRoomOccupancyForWindow(roomId, orgId, windowStart, windowEnd);
 
     const tenantSplits: Array<{
       tenant: mongoose.Types.ObjectId;
       daysOccupied: number;
       sharePaise: number;
+      status: 'pending_billing' | 'invoiced';
+      billingPeriod?: { from: Date; to: Date };
     }> = [];
 
-    if (roomOccupants.length > 0 && totalAmountPaise > 0) {
-      if (splitMethod === 'by_days_occupied') {
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (occupantDays.length > 0 && totalAmountPaise > 0) {
+      if (splitMethod === 'equal') {
+        const count = occupantDays.length;
+        const baseShare = Math.floor(totalAmountPaise / count);
+        let remainder = totalAmountPaise % count;
 
-        const occupantDays = roomOccupants.map(as => {
-          const checkin = as.startDate ? new Date(as.startDate) : startOfMonth;
-          const effectiveStart = checkin > startOfMonth ? checkin : startOfMonth;
-          const days = Math.max(
-            1,
-            Math.ceil((now.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)) + 1,
-          );
-          return { tenant: as.tenantId, days };
+        occupantDays.forEach(od => {
+          const share = baseShare + (remainder > 0 ? 1 : 0);
+          if (remainder > 0) remainder--;
+
+          tenantSplits.push({
+            tenant: od.tenantId,
+            daysOccupied: od.days,
+            sharePaise: share,
+            status: billingMode === 'separate_invoice' ? 'invoiced' : 'pending_billing',
+            billingPeriod: { from: windowStart, to: windowEnd },
+          });
         });
-
+      } else {
+        // By days occupied (Default & Recommended)
         const totalDays = occupantDays.reduce((sum, od) => sum + od.days, 0);
         let allocatedPaise = 0;
 
-        occupantDays.forEach((od, idx) => {
-          const isLast = idx === occupantDays.length - 1;
+        // Sort descending by days so remainder paise goes to occupants with most days
+        const sortedOccupants = [...occupantDays].sort((a, b) => b.days - a.days);
+
+        sortedOccupants.forEach((od, idx) => {
+          const isLast = idx === sortedOccupants.length - 1;
           const share = isLast
             ? totalAmountPaise - allocatedPaise
             : Math.round((totalAmountPaise * od.days) / totalDays);
           allocatedPaise += share;
 
           tenantSplits.push({
-            tenant: od.tenant,
+            tenant: od.tenantId,
             daysOccupied: od.days,
             sharePaise: share,
-          });
-        });
-      } else {
-        // Equal split
-        const count = roomOccupants.length;
-        const baseShare = Math.floor(totalAmountPaise / count);
-        let remainder = totalAmountPaise % count;
-
-        roomOccupants.forEach(as => {
-          const share = baseShare + (remainder > 0 ? 1 : 0);
-          if (remainder > 0) remainder--;
-
-          tenantSplits.push({
-            tenant: as.tenantId,
-            daysOccupied: 30,
-            sharePaise: share,
+            status: billingMode === 'separate_invoice' ? 'invoiced' : 'pending_billing',
+            billingPeriod: { from: windowStart, to: windowEnd },
           });
         });
       }
@@ -363,7 +422,10 @@ export const recordReading = async (
       unitsConsumed,
       ratePaisePerUnit: effectiveRatePaise,
       totalAmountPaise,
-      readingDate: readingDate ? new Date(readingDate) : new Date(),
+      readingDate: windowEnd,
+      previousReadingDate: windowStart,
+      currentReadingDate: windowEnd,
+      billingMode,
       photoUrl,
       splitMethod,
       tenantSplits,
@@ -503,59 +565,70 @@ export const updateReading = async (
     const unitsConsumed = currReading - prevReading;
     const totalAmountPaise = Math.round(unitsConsumed * effectiveRatePaise);
 
-    // Recalculate tenant splits across active & notice occupants
-    const roomOccupants = await getRoomOccupants(reading.room, orgId);
+    const windowEnd = validated.currentReadingDate
+      ? new Date(validated.currentReadingDate)
+      : validated.readingDate
+        ? new Date(validated.readingDate)
+        : reading.currentReadingDate || reading.readingDate;
+    const windowStart = validated.previousReadingDate
+      ? new Date(validated.previousReadingDate)
+      : reading.previousReadingDate ||
+        new Date(windowEnd.getFullYear(), windowEnd.getMonth(), 1);
+
+    const billingMode = validated.billingMode ?? reading.billingMode ?? 'next_rent_invoice';
+
+    // Recalculate tenant splits across occupants during the window
+    const occupantDays = await getRoomOccupancyForWindow(
+      reading.room,
+      orgId,
+      windowStart,
+      windowEnd,
+    );
 
     const tenantSplits: Array<{
       tenant: mongoose.Types.ObjectId;
       daysOccupied: number;
       sharePaise: number;
+      status: 'pending_billing' | 'invoiced';
+      billingPeriod?: { from: Date; to: Date };
     }> = [];
 
-    if (roomOccupants.length > 0 && totalAmountPaise > 0) {
-      if (splitMethod === 'by_days_occupied') {
-        const now = reading.readingDate || new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (occupantDays.length > 0 && totalAmountPaise > 0) {
+      if (splitMethod === 'equal') {
+        const count = occupantDays.length;
+        const baseShare = Math.floor(totalAmountPaise / count);
+        let remainder = totalAmountPaise % count;
 
-        const occupantDays = roomOccupants.map(as => {
-          const checkin = as.startDate ? new Date(as.startDate) : startOfMonth;
-          const effectiveStart = checkin > startOfMonth ? checkin : startOfMonth;
-          const days = Math.max(
-            1,
-            Math.ceil((now.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)) + 1,
-          );
-          return { tenant: as.tenantId, days };
+        occupantDays.forEach(od => {
+          const share = baseShare + (remainder > 0 ? 1 : 0);
+          if (remainder > 0) remainder--;
+
+          tenantSplits.push({
+            tenant: od.tenantId,
+            daysOccupied: od.days,
+            sharePaise: share,
+            status: billingMode === 'separate_invoice' ? 'invoiced' : 'pending_billing',
+            billingPeriod: { from: windowStart, to: windowEnd },
+          });
         });
-
+      } else {
         const totalDays = occupantDays.reduce((sum, od) => sum + od.days, 0);
         let allocatedPaise = 0;
+        const sortedOccupants = [...occupantDays].sort((a, b) => b.days - a.days);
 
-        occupantDays.forEach((od, idx) => {
-          const isLast = idx === occupantDays.length - 1;
+        sortedOccupants.forEach((od, idx) => {
+          const isLast = idx === sortedOccupants.length - 1;
           const share = isLast
             ? totalAmountPaise - allocatedPaise
             : Math.round((totalAmountPaise * od.days) / totalDays);
           allocatedPaise += share;
 
           tenantSplits.push({
-            tenant: od.tenant,
+            tenant: od.tenantId,
             daysOccupied: od.days,
             sharePaise: share,
-          });
-        });
-      } else {
-        const count = roomOccupants.length;
-        const baseShare = Math.floor(totalAmountPaise / count);
-        let remainder = totalAmountPaise % count;
-
-        roomOccupants.forEach(as => {
-          const share = baseShare + (remainder > 0 ? 1 : 0);
-          if (remainder > 0) remainder--;
-
-          tenantSplits.push({
-            tenant: as.tenantId,
-            daysOccupied: 30,
-            sharePaise: share,
+            status: billingMode === 'separate_invoice' ? 'invoiced' : 'pending_billing',
+            billingPeriod: { from: windowStart, to: windowEnd },
           });
         });
       }
@@ -569,6 +642,9 @@ export const updateReading = async (
     reading.ratePaisePerUnit = effectiveRatePaise;
     reading.totalAmountPaise = totalAmountPaise;
     reading.splitMethod = splitMethod;
+    reading.previousReadingDate = windowStart;
+    reading.currentReadingDate = windowEnd;
+    reading.billingMode = billingMode;
     reading.tenantSplits = tenantSplits as any;
     if (validated.readingDate) reading.readingDate = new Date(validated.readingDate);
     if (validated.photoUrl !== undefined) reading.photoUrl = validated.photoUrl;

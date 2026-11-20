@@ -79,6 +79,12 @@ const InvoiceSchema = new mongoose_1.Schema({
         unique: true,
         trim: true,
     },
+    invoiceType: {
+        type: String,
+        enum: ['rent', 'electricity', 'custom'],
+        default: 'rent',
+        index: true,
+    },
     month: {
         type: Number,
         required: [true, 'Month is required'],
@@ -146,8 +152,8 @@ const InvoiceSchema = new mongoose_1.Schema({
         },
     },
 });
-// Compound unique index ensuring idempotent billing (prevent double-invoicing per tenant per month)
-InvoiceSchema.index({ tenant: 1, month: 1, year: 1 }, { unique: true });
+// Compound unique index ensuring idempotent billing (prevent double-invoicing per tenant per month per invoice type)
+InvoiceSchema.index({ organization: 1, tenant: 1, month: 1, year: 1, invoiceType: 1 }, { unique: true });
 InvoiceSchema.index({ organization: 1, status: 1, dueDate: 1 });
 InvoiceSchema.index({ property: 1, month: 1, year: 1 });
 exports.Invoice = mongoose_1.default.models.Invoice || mongoose_1.default.model('Invoice', InvoiceSchema);

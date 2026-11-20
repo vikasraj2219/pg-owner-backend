@@ -88,6 +88,19 @@ const MeterReadingSchema = new mongoose_1.Schema({
         default: Date.now,
         required: true,
     },
+    previousReadingDate: {
+        type: Date,
+    },
+    currentReadingDate: {
+        type: Date,
+        default: Date.now,
+    },
+    billingMode: {
+        type: String,
+        enum: ['next_rent_invoice', 'separate_invoice'],
+        default: 'next_rent_invoice',
+        required: true,
+    },
     photoUrl: {
         type: String,
         trim: true,
@@ -115,9 +128,19 @@ const MeterReadingSchema = new mongoose_1.Schema({
                 required: true,
                 min: 0,
             },
+            status: {
+                type: String,
+                enum: ['pending_billing', 'invoiced', 'settled_at_checkout', 'cancelled'],
+                default: 'pending_billing',
+                required: true,
+            },
             invoice: {
                 type: mongoose_1.Schema.Types.ObjectId,
                 ref: 'Invoice',
+            },
+            billingPeriod: {
+                from: { type: Date },
+                to: { type: Date },
             },
         },
     ],

@@ -2,6 +2,7 @@ import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export type InvoiceStatus = 'unpaid' | 'partially_paid' | 'paid' | 'canceled';
 export type InvoiceItemCategory = 'rent' | 'electricity' | 'mess' | 'late_fee' | 'damage';
+export type InvoiceType = 'rent' | 'electricity' | 'custom';
 
 export interface IInvoiceItem {
   description: string;
@@ -14,6 +15,7 @@ export interface IInvoice extends Document {
   property: mongoose.Types.ObjectId;
   tenant: mongoose.Types.ObjectId;
   invoiceNumber: string;
+  invoiceType: InvoiceType;
   month: number; // 1-12
   year: number; // e.g. 2026
   dueDate: Date;
@@ -77,6 +79,12 @@ const InvoiceSchema = new Schema<IInvoice>(
       required: [true, 'Invoice number is required'],
       unique: true,
       trim: true,
+    },
+    invoiceType: {
+      type: String,
+      enum: ['rent', 'electricity', 'custom'],
+      default: 'rent',
+      index: true,
     },
     month: {
       type: Number,
@@ -148,8 +156,8 @@ const InvoiceSchema = new Schema<IInvoice>(
   },
 );
 
-// Compound unique index ensuring idempotent billing (prevent double-invoicing per tenant per month)
-InvoiceSchema.index({ tenant: 1, month: 1, year: 1 }, { unique: true });
+// Compound unique index ensuring idempotent billing (prevent double-invoicing per tenant per month per invoice type)
+InvoiceSchema.index({ organization: 1, tenant: 1, month: 1, year: 1, invoiceType: 1 }, { unique: true });
 InvoiceSchema.index({ organization: 1, status: 1, dueDate: 1 });
 InvoiceSchema.index({ property: 1, month: 1, year: 1 });
 

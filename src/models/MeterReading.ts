@@ -1,10 +1,18 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
+export type MeterBillingMode = 'next_rent_invoice' | 'separate_invoice';
+export type MeterSplitStatus = 'pending_billing' | 'invoiced' | 'settled_at_checkout' | 'cancelled';
+
 export interface ITenantMeterSplit {
   tenant: Types.ObjectId;
   daysOccupied: number;
   sharePaise: number;
+  status: MeterSplitStatus;
   invoice?: Types.ObjectId;
+  billingPeriod?: {
+    from: Date;
+    to: Date;
+  };
 }
 
 export interface IMeterReading extends Document {
@@ -18,6 +26,9 @@ export interface IMeterReading extends Document {
   ratePaisePerUnit: number;
   totalAmountPaise: number;
   readingDate: Date;
+  previousReadingDate?: Date;
+  currentReadingDate?: Date;
+  billingMode: MeterBillingMode;
   photoUrl?: string;
   splitMethod: 'equal' | 'by_days_occupied';
   tenantSplits: ITenantMeterSplit[];
@@ -80,6 +91,19 @@ const MeterReadingSchema = new Schema<IMeterReading>(
       default: Date.now,
       required: true,
     },
+    previousReadingDate: {
+      type: Date,
+    },
+    currentReadingDate: {
+      type: Date,
+      default: Date.now,
+    },
+    billingMode: {
+      type: String,
+      enum: ['next_rent_invoice', 'separate_invoice'],
+      default: 'next_rent_invoice',
+      required: true,
+    },
     photoUrl: {
       type: String,
       trim: true,
@@ -107,9 +131,19 @@ const MeterReadingSchema = new Schema<IMeterReading>(
           required: true,
           min: 0,
         },
+        status: {
+          type: String,
+          enum: ['pending_billing', 'invoiced', 'settled_at_checkout', 'cancelled'],
+          default: 'pending_billing',
+          required: true,
+        },
         invoice: {
           type: Schema.Types.ObjectId,
           ref: 'Invoice',
+        },
+        billingPeriod: {
+          from: { type: Date },
+          to: { type: Date },
         },
       },
     ],
