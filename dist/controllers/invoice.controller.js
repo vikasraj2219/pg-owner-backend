@@ -71,7 +71,7 @@ const getInvoices = async (req, res, next) => {
             filter.status = 'paid';
         }
         const invoices = await Invoice_1.Invoice.find(filter)
-            .populate('tenant', 'fullName phone currentBed status')
+            .populate('tenant', 'fullName phone currentBed status photoUrl gender')
             .populate('property', 'name type address upiVpa')
             .sort({ dueDate: -1, createdAt: -1 });
         const search = req.query.search?.toLowerCase().trim();
@@ -119,7 +119,7 @@ const getInvoiceById = async (req, res, next) => {
             throw new errorHandler_1.AppError('Invalid invoice ID format', 400);
         }
         const invoice = await Invoice_1.Invoice.findOne({ _id: id, organization: orgId })
-            .populate('tenant', 'fullName phone currentBed status')
+            .populate('tenant', 'fullName phone currentBed status photoUrl gender')
             .populate('property', 'name type address upiVpa');
         if (!invoice) {
             throw new errorHandler_1.AppError('Invoice not found or does not belong to your organization', 404);

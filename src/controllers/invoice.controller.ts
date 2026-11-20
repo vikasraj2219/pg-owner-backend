@@ -86,7 +86,7 @@ export const getInvoices = async (
     }
 
     const invoices = await Invoice.find(filter)
-      .populate('tenant', 'fullName phone currentBed status')
+      .populate('tenant', 'fullName phone currentBed status photoUrl gender')
       .populate('property', 'name type address upiVpa')
       .sort({ dueDate: -1, createdAt: -1 });
 
@@ -142,7 +142,7 @@ export const getInvoiceById = async (
     }
 
     const invoice = await Invoice.findOne({ _id: id, organization: orgId })
-      .populate('tenant', 'fullName phone currentBed status')
+      .populate('tenant', 'fullName phone currentBed status photoUrl gender')
       .populate('property', 'name type address upiVpa');
 
     if (!invoice) {

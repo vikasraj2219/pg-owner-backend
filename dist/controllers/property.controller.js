@@ -9,7 +9,9 @@ const property_validator_1 = require("../validators/property.validator");
 const Property_1 = require("../models/Property");
 const Room_1 = require("../models/Room");
 const Bed_1 = require("../models/Bed");
-require("../models/Tenant");
+const Tenant_1 = require("../models/Tenant");
+const BedAssignment_1 = require("../models/BedAssignment");
+const Invoice_1 = require("../models/Invoice");
 const Subscription_1 = require("../models/Subscription");
 const errorHandler_1 = require("../middleware/errorHandler");
 /**
@@ -629,8 +631,84 @@ const getPropertyMatrix = async (req, res, next) => {
         });
         // Fetch all beds for this property
         const beds = await Bed_1.Bed.find({ property: property._id, organization: orgId })
-            .populate('currentTenant', 'fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber photoUrl')
+            .populate('currentTenant', 'fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber photoUrl gender')
             .sort({ bedNumber: 1 });
+        // Fetch all active/notice tenants in this property to reconcile with beds
+        const activeTenants = await Tenant_1.Tenant.find({
+            property: property._id,
+            organization: orgId,
+            status: { $in: ['active', 'notice_period'] },
+            isDeleted: { $ne: true },
+        }).select('fullName phone monthlyRentPaise status kycDocUrl kycDocType kycMaskedNumber photoUrl gender currentBed joinDate');
+        // Fetch active bed assignments to ensure 100% reconciliation
+        const activeAssignments = await BedAssignment_1.BedAssignment.find({
+            property: property._id,
+            organization: orgId,
+            status: 'active',
+        }).select('bed tenant');
+        // Build lookup maps by bed ID
+        const tenantByBedId = new Map();
+        activeTenants.forEach(t => {
+            if (t.currentBed) {
+                tenantByBedId.set(t.currentBed.toString(), t);
+            }
+        });
+        for (const assign of activeAssignments) {
+            const bId = assign.bed?.toString();
+            if (bId && !tenantByBedId.has(bId)) {
+                const found = activeTenants.find(t => t._id.toString() === assign.tenant?.toString());
+                if (found) {
+                    tenantByBedId.set(bId, found);
+                }
+            }
+        }
+        // Unpaid invoices lookup for live dues badge
+        const tenantIds = activeTenants.map(t => t._id);
+        const unpaidInvoices = await Invoice_1.Invoice.find({
+            organization: orgId,
+            tenant: { $in: tenantIds },
+            status: { $in: ['unpaid', 'partially_paid'] },
+        }).select('tenant balanceDuePaise');
+        const unpaidMap = new Map();
+        unpaidInvoices.forEach(inv => {
+            const tId = inv.tenant.toString();
+            unpaidMap.set(tId, (unpaidMap.get(tId) || 0) + (inv.balanceDuePaise || 0));
+        });
+        // Reconcile and self-heal beds with active tenants
+        beds.forEach(bed => {
+            const bId = bed._id.toString();
+            const activeTenant = tenantByBedId.get(bId);
+            if (activeTenant) {
+                const tObj = activeTenant.toObject ? activeTenant.toObject() : { ...activeTenant };
+                const duePaise = unpaidMap.get(tObj._id.toString()) || 0;
+                tObj.rentDuePaise = duePaise;
+                tObj.paymentStatus = duePaise > 0 ? 'DUE' : 'PAID';
+                bed.currentTenant = tObj;
+                bed.status = activeTenant.status === 'notice_period' ? 'notice_period' : 'occupied';
+                // Auto-heal Bed in DB if it was out of sync
+                Bed_1.Bed.updateOne({ _id: bed._id }, {
+                    $set: {
+                        currentTenant: activeTenant._id,
+                        status: bed.status,
+                    },
+                }).exec();
+            }
+            else if (bed.currentTenant && typeof bed.currentTenant === 'object') {
+                const ct = bed.currentTenant;
+                if (ct.status === 'checked_out' || ct.isDeleted) {
+                    bed.currentTenant = undefined;
+                    bed.status = 'available';
+                    Bed_1.Bed.updateOne({ _id: bed._id }, { $set: { status: 'available' }, $unset: { currentTenant: 1 } }).exec();
+                }
+                else {
+                    const ctObj = ct.toObject ? ct.toObject() : { ...ct };
+                    const duePaise = unpaidMap.get(ctObj._id.toString()) || 0;
+                    ctObj.rentDuePaise = duePaise;
+                    ctObj.paymentStatus = duePaise > 0 ? 'DUE' : 'PAID';
+                    bed.currentTenant = ctObj;
+                }
+            }
+        });
         // Map beds by room ID
         const bedsByRoom = new Map();
         beds.forEach(bed => {
