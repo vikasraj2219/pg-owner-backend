@@ -506,11 +506,33 @@ const moveBed = async (req, res, next) => {
         if (targetBed.status !== 'available') {
             throw new errorHandler_1.AppError(`Target bed ${targetBed.bedNumber} is not available (current status: ${targetBed.status})`, 400);
         }
+        const oldRentPaise = tenant.monthlyRentPaise || 0;
+        const targetRentPaise = newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0
+            ? Number(newMonthlyRentPaise)
+            : (targetBed.baseRentPaise ?? targetBed.room?.baseRentPaisePerBed ?? oldRentPaise);
+        const isDifferentRent = targetRentPaise !== oldRentPaise;
+        // Disallow immediate mid-month transfer when rent is different
+        if (isDifferentRent && effectiveType === 'immediate') {
+            throw new errorHandler_1.AppError('Mid-month immediate transfer is not allowed for beds with different rent. Transfers must take effect from the next billing cycle due date or later.', 400);
+        }
         // Determine target effective date
         let effectiveDate;
         if (effectiveType === 'next_month') {
             const now = new Date();
-            effectiveDate = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+            const cycleDay = tenant.billingCycleDay ||
+                (tenant.joinDate ? new Date(tenant.joinDate).getDate() : 1);
+            let targetYear = now.getFullYear();
+            let targetMonth = now.getMonth();
+            if (now.getDate() >= cycleDay) {
+                targetMonth += 1;
+            }
+            if (targetMonth > 11) {
+                targetYear += Math.floor(targetMonth / 12);
+                targetMonth = targetMonth % 12;
+            }
+            const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+            const validDay = Math.min(cycleDay, daysInTargetMonth);
+            effectiveDate = new Date(targetYear, targetMonth, validDay, 0, 0, 0, 0);
         }
         else if (effectiveType === 'custom') {
             if (!customEffectiveDate) {
@@ -522,13 +544,9 @@ const moveBed = async (req, res, next) => {
             }
         }
         else {
-            // immediate
+            // immediate (allowed only for same rent)
             effectiveDate = new Date();
         }
-        const oldRentPaise = tenant.monthlyRentPaise || 0;
-        const targetRentPaise = newMonthlyRentPaise !== undefined && Number(newMonthlyRentPaise) >= 0
-            ? Number(newMonthlyRentPaise)
-            : (targetBed.baseRentPaise ?? targetBed.room?.baseRentPaisePerBed ?? oldRentPaise);
         const proration = (0, proration_service_1.calculateBedTransferProration)(oldRentPaise, targetRentPaise, effectiveDate, effectiveType);
         // If tenant already had a scheduled transfer, free the previously reserved bed
         if (tenant.scheduledTransfer && tenant.scheduledTransfer.targetBed) {

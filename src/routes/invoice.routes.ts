@@ -5,6 +5,9 @@ import {
   generateMonthlyInvoices,
   markInvoicePaid,
   getPayments,
+  createManualInvoice,
+  updateInvoice,
+  deleteInvoice,
 } from '../controllers/invoice.controller';
 import { protect } from '../middleware/auth';
 import { enforceOrgScope } from '../middleware/enforceOrgScope';
@@ -33,8 +36,11 @@ router.use(protect);
 router.use(enforceOrgScope);
 
 router.get('/', getInvoices);
+router.post('/', createManualInvoice);
 router.get('/payments', getPayments);
 router.get('/:id', getInvoiceById);
+router.put('/:id', updateInvoice);
+router.delete('/:id', deleteInvoice);
 router.post('/:id/pay', markInvoicePaid);
 
 export default router;

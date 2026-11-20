@@ -25,7 +25,10 @@ router.post('/generate-monthly', cronOrAuthMiddleware, invoice_controller_1.gene
 router.use(auth_1.protect);
 router.use(enforceOrgScope_1.enforceOrgScope);
 router.get('/', invoice_controller_1.getInvoices);
+router.post('/', invoice_controller_1.createManualInvoice);
 router.get('/payments', invoice_controller_1.getPayments);
 router.get('/:id', invoice_controller_1.getInvoiceById);
+router.put('/:id', invoice_controller_1.updateInvoice);
+router.delete('/:id', invoice_controller_1.deleteInvoice);
 router.post('/:id/pay', invoice_controller_1.markInvoicePaid);
 exports.default = router;

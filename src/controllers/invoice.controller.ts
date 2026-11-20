@@ -3,13 +3,19 @@ import mongoose from 'mongoose';
 import { Invoice } from '../models/Invoice';
 import { Payment } from '../models/Payment';
 import { Organization } from '../models/Organization';
+import { Tenant } from '../models/Tenant';
 import { BedAssignment } from '../models/BedAssignment';
 import { AppError } from '../middleware/errorHandler';
 import { AuthenticatedRequest } from '../types';
 import { generateInvoiceNumber } from '../services/invoiceNumber.service';
 import { generateReceiptNumber } from '../services/receiptNumber.service';
 import { calculateJoinDateCycle } from '../services/proration.service';
-import { generateMonthlyInvoicesSchema, markPaidSchema } from '../validators/invoice.validator';
+import {
+  generateMonthlyInvoicesSchema,
+  markPaidSchema,
+  createManualInvoiceSchema,
+  updateInvoiceSchema,
+} from '../validators/invoice.validator';
 import { env } from '../config/env';
 
 const MONTH_NAMES = [
@@ -71,14 +77,16 @@ export const getInvoices = async (
 
     const statusParam = req.query.status as string | undefined;
     const now = new Date();
+    const overdueCutoff = new Date(now.getTime() - gracePeriodDays * 24 * 60 * 60 * 1000);
 
     if (statusParam === 'overdue') {
       filter.status = { $in: ['unpaid', 'partially_paid'] };
       // Due date + grace period has passed
-      const overdueCutoff = new Date(now.getTime() - gracePeriodDays * 24 * 60 * 60 * 1000);
       filter.dueDate = { $lt: overdueCutoff };
     } else if (statusParam === 'unpaid') {
       filter.status = { $in: ['unpaid', 'partially_paid'] };
+      // Not yet overdue: due date is on or after the overdue cutoff
+      filter.dueDate = { $gte: overdueCutoff };
     } else if (statusParam === 'paid') {
       filter.status = 'paid';
     }
@@ -457,6 +465,226 @@ export const getPayments = async (
       success: true,
       count: payments.length,
       data: payments,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/invoices
+ * Create a manual invoice for a tenant
+ */
+export const createManualInvoice = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const orgId = req.orgId;
+    if (!orgId) {
+      throw new AppError('Organization context is required', 403);
+    }
+
+    const parsed = createManualInvoiceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(parsed.error.errors[0]?.message || 'Invalid invoice data', 400);
+    }
+
+    const { tenantId, propertyId, dueDate, month, year, items } = parsed.data;
+
+    const tenant = await Tenant.findOne({ _id: tenantId, organization: orgId });
+    if (!tenant) {
+      throw new AppError('Tenant not found in your organization', 404);
+    }
+
+    const propId = propertyId || tenant.property;
+    if (!propId) {
+      throw new AppError('Property ID is required or tenant must be assigned to a property', 400);
+    }
+
+    const dueDateObj = new Date(dueDate);
+    if (isNaN(dueDateObj.getTime())) {
+      throw new AppError('Invalid due date', 400);
+    }
+
+    const invMonth = month ?? dueDateObj.getMonth() + 1;
+    const invYear = year ?? dueDateObj.getFullYear();
+
+    // Check if an invoice already exists for this tenant in this month/year
+    const existing = await Invoice.findOne({
+      organization: orgId,
+      tenant: tenantId,
+      month: invMonth,
+      year: invYear,
+    });
+
+    if (existing) {
+      throw new AppError(
+        `An invoice for ${MONTH_NAMES[invMonth - 1]} ${invYear} already exists for this tenant (${existing.invoiceNumber}). You can edit the existing invoice to add or adjust items.`,
+        400,
+      );
+    }
+
+    const totalAmountPaise = items.reduce((sum, item) => sum + item.amountPaise, 0);
+    if (totalAmountPaise <= 0) {
+      throw new AppError('Total invoice amount must be greater than 0', 400);
+    }
+
+    const invoiceNumber = await generateInvoiceNumber(orgId.toString(), invYear, invMonth);
+
+    const invoice = await Invoice.create({
+      organization: orgId,
+      property: propId,
+      tenant: tenantId,
+      invoiceNumber,
+      month: invMonth,
+      year: invYear,
+      dueDate: dueDateObj,
+      items,
+      totalAmountPaise,
+      amountPaidPaise: 0,
+      balanceDuePaise: totalAmountPaise,
+      status: 'unpaid',
+    });
+
+    const populated = await Invoice.findById(invoice._id)
+      .populate('tenant', 'fullName phone currentBed status')
+      .populate('property', 'name type address upiVpa');
+
+    res.status(201).json({
+      success: true,
+      message: `Invoice ${invoiceNumber} created successfully`,
+      data: populated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/invoices/:id
+ * Update an existing invoice (dueDate, items, status)
+ */
+export const updateInvoice = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+    if (!orgId) {
+      throw new AppError('Organization context is required', 403);
+    }
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid invoice ID format', 400);
+    }
+
+    const parsed = updateInvoiceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(parsed.error.errors[0]?.message || 'Invalid update data', 400);
+    }
+
+    const invoice = await Invoice.findOne({ _id: id, organization: orgId });
+    if (!invoice) {
+      throw new AppError('Invoice not found or does not belong to your organization', 404);
+    }
+
+    const { dueDate, items, status } = parsed.data;
+
+    if (dueDate) {
+      const d = new Date(dueDate);
+      if (isNaN(d.getTime())) {
+        throw new AppError('Invalid due date', 400);
+      }
+      invoice.dueDate = d;
+    }
+
+    if (items && items.length > 0) {
+      const newTotalPaise = items.reduce((sum, it) => sum + it.amountPaise, 0);
+      if (newTotalPaise < invoice.amountPaidPaise) {
+        throw new AppError(
+          `Total amount (₹${(newTotalPaise / 100).toFixed(2)}) cannot be less than already paid amount (₹${(invoice.amountPaidPaise / 100).toFixed(2)})`,
+          400,
+        );
+      }
+      invoice.items = items as any;
+      invoice.totalAmountPaise = newTotalPaise;
+      invoice.balanceDuePaise = Math.max(0, newTotalPaise - invoice.amountPaidPaise);
+      if (invoice.balanceDuePaise === 0) {
+        invoice.status = 'paid';
+        if (!invoice.paidAt) invoice.paidAt = new Date();
+      } else if (invoice.amountPaidPaise > 0) {
+        invoice.status = 'partially_paid';
+      } else {
+        invoice.status = 'unpaid';
+      }
+    }
+
+    if (status) {
+      if (status === 'canceled' && invoice.amountPaidPaise > 0) {
+        throw new AppError('Cannot cancel an invoice with recorded payments', 400);
+      }
+      invoice.status = status;
+    }
+
+    await invoice.save();
+
+    const updated = await Invoice.findById(invoice._id)
+      .populate('tenant', 'fullName phone currentBed status')
+      .populate('property', 'name type address upiVpa');
+
+    res.status(200).json({
+      success: true,
+      message: 'Invoice updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/invoices/:id
+ * Delete an existing invoice (if no payments made against it)
+ */
+export const deleteInvoice = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orgId = req.orgId;
+    if (!orgId) {
+      throw new AppError('Organization context is required', 403);
+    }
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid invoice ID format', 400);
+    }
+
+    const invoice = await Invoice.findOne({ _id: id, organization: orgId });
+    if (!invoice) {
+      throw new AppError('Invoice not found or does not belong to your organization', 404);
+    }
+
+    if (invoice.amountPaidPaise > 0) {
+      throw new AppError(
+        'Cannot delete an invoice with recorded payments. Please refund or remove the payments first, or mark the invoice as canceled.',
+        400,
+      );
+    }
+
+    // Also delete any dangling payments or related records if any
+    await Payment.deleteMany({ invoice: invoice._id, organization: orgId });
+    await Invoice.deleteOne({ _id: invoice._id, organization: orgId });
+
+    res.status(200).json({
+      success: true,
+      message: `Invoice ${invoice.invoiceNumber} deleted successfully`,
     });
   } catch (error) {
     next(error);
