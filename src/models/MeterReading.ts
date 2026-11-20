@@ -4,6 +4,7 @@ export interface ITenantMeterSplit {
   tenant: Types.ObjectId;
   daysOccupied: number;
   sharePaise: number;
+  invoice?: Types.ObjectId;
 }
 
 export interface IMeterReading extends Document {
@@ -105,6 +106,10 @@ const MeterReadingSchema = new Schema<IMeterReading>(
           type: Number,
           required: true,
           min: 0,
+        },
+        invoice: {
+          type: Schema.Types.ObjectId,
+          ref: 'Invoice',
         },
       },
     ],

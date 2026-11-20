@@ -115,6 +115,10 @@ const MeterReadingSchema = new mongoose_1.Schema({
                 required: true,
                 min: 0,
             },
+            invoice: {
+                type: mongoose_1.Schema.Types.ObjectId,
+                ref: 'Invoice',
+            },
         },
     ],
     recordedBy: {

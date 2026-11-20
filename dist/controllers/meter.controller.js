@@ -7,6 +7,7 @@ exports.deleteReading = exports.updateReading = exports.getLatestRoomReading = e
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const models_1 = require("../models");
+const invoiceNumber_service_1 = require("../services/invoiceNumber.service");
 const meter_validator_1 = require("../validators/meter.validator");
 /**
  * Helper to retrieve all current room occupants including both active tenants
@@ -71,6 +72,164 @@ async function getRoomOccupants(roomId, orgId) {
             startDate: o.startDate || matchingTenant?.joinDate || matchingTenant?.createdAt,
         };
     });
+}
+/**
+ * Synchronize tenant meter splits with the Invoice collection.
+ * Creates or updates an electricity line item for each tenant split in the corresponding billing cycle.
+ */
+async function syncMeterReadingToInvoices(reading, orgId) {
+    const readingDate = reading.readingDate ? new Date(reading.readingDate) : new Date();
+    const invMonth = readingDate.getMonth() + 1;
+    const invYear = readingDate.getFullYear();
+    const identifier = reading.meterIdentifier || 'Sub-meter';
+    const itemTag = `[MTR:${reading._id.toString()}]`;
+    const ebDesc = `Electricity: ${identifier} (${reading.unitsConsumed}u @ ₹${(reading.ratePaisePerUnit / 100).toFixed(1)}/u) ${itemTag}`;
+    for (const split of reading.tenantSplits || []) {
+        if (!split.tenant)
+            continue;
+        const tenantId = split.tenant._id || split.tenant;
+        let invoice = await models_1.Invoice.findOne({
+            organization: orgId,
+            tenant: tenantId,
+            month: invMonth,
+            year: invYear,
+        });
+        if (split.sharePaise > 0) {
+            if (invoice) {
+                // Find if this reading's electricity line item is already present
+                const existingIdx = invoice.items.findIndex(it => it.category === 'electricity' &&
+                    (it.description.includes(itemTag) ||
+                        it.description.includes(`Electricity: ${identifier}`)));
+                const existingItem = existingIdx >= 0 ? invoice.items[existingIdx] : undefined;
+                if (existingItem) {
+                    existingItem.description = ebDesc;
+                    existingItem.amountPaise = split.sharePaise;
+                }
+                else {
+                    invoice.items.push({
+                        description: ebDesc,
+                        amountPaise: split.sharePaise,
+                        category: 'electricity',
+                    });
+                }
+                const newTotal = invoice.items.reduce((sum, it) => sum + it.amountPaise, 0);
+                invoice.totalAmountPaise = newTotal;
+                invoice.balanceDuePaise = Math.max(0, newTotal - invoice.amountPaidPaise);
+                if (invoice.balanceDuePaise === 0 && invoice.totalAmountPaise > 0) {
+                    invoice.status = 'paid';
+                }
+                else if (invoice.amountPaidPaise > 0) {
+                    invoice.status = 'partially_paid';
+                }
+                else {
+                    invoice.status = 'unpaid';
+                }
+                await invoice.save();
+                split.invoice = invoice._id;
+            }
+            else {
+                // Generate a new invoice for this tenant for electricity
+                const invNum = await (0, invoiceNumber_service_1.generateInvoiceNumber)(orgId.toString(), invYear, invMonth);
+                const newInvoice = await models_1.Invoice.create({
+                    organization: orgId,
+                    property: reading.property,
+                    tenant: tenantId,
+                    invoiceNumber: invNum,
+                    month: invMonth,
+                    year: invYear,
+                    dueDate: readingDate,
+                    items: [
+                        {
+                            description: ebDesc,
+                            amountPaise: split.sharePaise,
+                            category: 'electricity',
+                        },
+                    ],
+                    totalAmountPaise: split.sharePaise,
+                    amountPaidPaise: 0,
+                    balanceDuePaise: split.sharePaise,
+                    status: 'unpaid',
+                });
+                split.invoice = newInvoice._id;
+            }
+        }
+        else if (invoice) {
+            // 0 split amount -> remove this reading's line item if previously added
+            const existingIdx = invoice.items.findIndex(it => it.category === 'electricity' &&
+                (it.description.includes(itemTag) ||
+                    it.description.includes(`Electricity: ${identifier}`)));
+            if (existingIdx >= 0) {
+                invoice.items.splice(existingIdx, 1);
+                if (invoice.items.length === 0 && invoice.amountPaidPaise === 0) {
+                    await models_1.Invoice.deleteOne({ _id: invoice._id, organization: orgId });
+                    split.invoice = undefined;
+                }
+                else {
+                    const newTotal = invoice.items.reduce((sum, it) => sum + it.amountPaise, 0);
+                    invoice.totalAmountPaise = newTotal;
+                    invoice.balanceDuePaise = Math.max(0, newTotal - invoice.amountPaidPaise);
+                    if (invoice.balanceDuePaise === 0 && invoice.totalAmountPaise > 0) {
+                        invoice.status = 'paid';
+                    }
+                    else if (invoice.amountPaidPaise > 0) {
+                        invoice.status = 'partially_paid';
+                    }
+                    else {
+                        invoice.status = 'unpaid';
+                    }
+                    await invoice.save();
+                }
+            }
+        }
+    }
+}
+/**
+ * Remove electricity charges associated with a deleted meter reading from tenant invoices.
+ */
+async function removeMeterReadingFromInvoices(reading, orgId) {
+    const itemTag = `[MTR:${reading._id.toString()}]`;
+    const identifier = reading.meterIdentifier || 'Sub-meter';
+    for (const split of reading.tenantSplits || []) {
+        if (!split.tenant)
+            continue;
+        const tenantId = split.tenant._id || split.tenant;
+        const invoice = await models_1.Invoice.findOne({
+            organization: orgId,
+            $or: [
+                { _id: split.invoice },
+                {
+                    tenant: tenantId,
+                    'items.description': { $regex: reading._id.toString() },
+                },
+            ],
+        });
+        if (invoice) {
+            const idx = invoice.items.findIndex(it => it.category === 'electricity' &&
+                (it.description.includes(itemTag) ||
+                    it.description.includes(`Electricity: ${identifier}`)));
+            if (idx >= 0) {
+                invoice.items.splice(idx, 1);
+                if (invoice.items.length === 0 && invoice.amountPaidPaise === 0) {
+                    await models_1.Invoice.deleteOne({ _id: invoice._id, organization: orgId });
+                }
+                else {
+                    const newTotal = invoice.items.reduce((sum, it) => sum + it.amountPaise, 0);
+                    invoice.totalAmountPaise = newTotal;
+                    invoice.balanceDuePaise = Math.max(0, newTotal - invoice.amountPaidPaise);
+                    if (invoice.balanceDuePaise === 0 && invoice.totalAmountPaise > 0) {
+                        invoice.status = 'paid';
+                    }
+                    else if (invoice.amountPaidPaise > 0) {
+                        invoice.status = 'partially_paid';
+                    }
+                    else {
+                        invoice.status = 'unpaid';
+                    }
+                    await invoice.save();
+                }
+            }
+        }
+    }
 }
 /**
  * Record a sub-meter electricity reading and compute room tenant split
@@ -157,6 +316,9 @@ const recordReading = async (req, res, next) => {
             tenantSplits,
             recordedBy: userId ? new mongoose_1.default.Types.ObjectId(userId) : undefined,
         });
+        // Synchronize electricity line items with monthly invoices for room occupants
+        await syncMeterReadingToInvoices(reading, orgId);
+        await reading.save();
         res.status(201).json({
             success: true,
             message: `Meter reading recorded. ${unitsConsumed} units consumed (₹${(totalAmountPaise / 100).toFixed(2)}) split across ${tenantSplits.length} tenant(s).`,
@@ -313,6 +475,8 @@ const updateReading = async (req, res, next) => {
             reading.readingDate = new Date(validated.readingDate);
         if (validated.photoUrl !== undefined)
             reading.photoUrl = validated.photoUrl;
+        // Synchronize updated electricity line items with monthly invoices for room occupants
+        await syncMeterReadingToInvoices(reading, orgId);
         await reading.save();
         res.status(200).json({
             success: true,
@@ -339,10 +503,13 @@ const deleteReading = async (req, res, next) => {
         if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
             throw new errorHandler_1.AppError('Invalid meter reading ID format', 400);
         }
-        const reading = await models_1.MeterReading.findOneAndDelete({ _id: id, organization: orgId });
+        const reading = await models_1.MeterReading.findOne({ _id: id, organization: orgId });
         if (!reading) {
             throw new errorHandler_1.AppError('Meter reading not found', 404);
         }
+        // Remove electricity line items from tenant invoices
+        await removeMeterReadingFromInvoices(reading, orgId);
+        await models_1.MeterReading.deleteOne({ _id: id, organization: orgId });
         res.status(200).json({
             success: true,
             message: 'Meter reading deleted successfully',
